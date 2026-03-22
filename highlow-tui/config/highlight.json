@@ -1,0 +1,68 @@
+{
+  "thresholds": {
+    "consecutiveCount": 3,
+    "significantPercentChange": 0.15,
+    "volumeSpikeRatio": 2.0,
+    "volumeSpikeWindow": 60
+  },
+  "colors": {
+    "flashHigh": {
+      "r": 34,
+      "g": 197,
+      "b": 94,
+      "a": 0.5
+    },
+    "flashLow": {
+      "r": 239,
+      "g": 68,
+      "b": 68,
+      "a": 0.5
+    },
+    "week52High": {
+      "r": 20,
+      "g": 83,
+      "b": 45,
+      "a": 0.5,
+      "border": {
+        "r": 34,
+        "g": 197,
+        "b": 94
+      }
+    },
+    "week52Low": {
+      "r": 127,
+      "g": 29,
+      "b": 29,
+      "a": 0.5,
+      "border": {
+        "r": 239,
+        "g": 68,
+        "b": 68
+      }
+    },
+    "yellow": {
+      "r": 234,
+      "g": 179,
+      "b": 8,
+      "a": 0.3
+    },
+    "orange": {
+      "r": 249,
+      "g": 115,
+      "b": 22,
+      "a": 0.3
+    },
+    "purple": {
+      "r": 147,
+      "g": 51,
+      "b": 234,
+      "a": 0.3
+    },
+    "volumeSpike": {
+      "r": 244,
+      "g": 114,
+      "b": 182,
+      "a": 0.4
+    }
+  }
+}

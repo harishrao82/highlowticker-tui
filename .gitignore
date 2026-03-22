@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# License server DB
+license-server/licenses.db
+
+# Local-only / demo files
+config.json
+license_cache.json
+pv.py
+license_private.pem
+license_public.pem
+
+# Git worktrees
+.worktrees/
+
+# Claude Code session files
+.claude/
+highlow-tui/.claude/
+highlow-tui/CLAUDE.md
+
+# Pro tier / Schwab integration (private)
+highlow-tui/providers/schwab_provider.py
+highlow-tui/core/schwab_connection.py
+highlow-tui/core/shared_api_client.py
+highlow-tui/core/subscription_manager.py
+highlow-tui/config/api_config.py
+
+# Other sub-projects (separate repos)
+highlow/
+highlow-tui-heavy/
+license-server/
+docs/
+HIGHLOW_TUI_MARKETING.md
