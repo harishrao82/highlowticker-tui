@@ -7,6 +7,7 @@ import asyncio
 import json
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 import os, certifi                             
@@ -30,6 +31,7 @@ from rich.style import Style
 MAX_TABLE_ROWS = 50
 RATE_BAR_WIDTH = 18
 RATE_TIMEFRAMES = ["20m", "5m", "1m", "30s"]
+MOMENTUM_WINDOW = 1200  # seconds of history to keep (20 min)
 
 
 def make_bar(value: float, max_val: float, width: int = RATE_BAR_WIDTH, reverse: bool = False) -> str:
@@ -168,6 +170,22 @@ class HighLowTUI(App):
         border: solid cyan;
         margin: 0 0;
     }
+    #momentum-box {
+        width: 1fr;
+        height: 1fr;
+        border: solid cyan;
+        margin: 0 0;
+        overflow: hidden hidden;
+    }
+    #momentum-chart {
+        height: 1fr;
+        overflow: hidden hidden;
+    }
+    #spy-chart {
+        height: 1fr;
+        border-top: dashed $primary-darken-3;
+        overflow: hidden hidden;
+    }
     DataTable {
         height: 1fr;
     }
@@ -224,8 +242,12 @@ class HighLowTUI(App):
         self._w_rate_bars = None
         self._w_highs = None
         self._w_lows  = None
+        self._w_momentum = None
+        self._w_spy      = None
         self._w_ticker = None
         self._w_mode_toggle = None
+        self._momentum_history: deque = deque()  # [(timestamp, score), ...]
+        self._spy_history:      deque = deque()  # [(timestamp, price), ...]
         self._ticker_text    = Text("")
         self._ticker_doubled = Text("")
         self._ticker_offset  = 0
@@ -246,6 +268,9 @@ class HighLowTUI(App):
             with Vertical(classes="table-box"):
                 yield Static("Session new lows", id="lows-label")
                 yield DataTable(id="lows-table", cursor_type="row", zebra_stripes=True)
+            with Vertical(id="momentum-box"):
+                yield Static("", id="momentum-chart")
+                yield Static("", id="spy-chart")
             with Vertical(classes="table-box"):
                 yield Static("Session new highs", id="highs-label")
                 yield DataTable(id="highs-table", cursor_type="row", zebra_stripes=True)
@@ -257,6 +282,8 @@ class HighLowTUI(App):
         self._w_rate_bars = self.query_one("#rate-bars", Static)
         self._w_highs     = self.query_one("#highs-table", DataTable)
         self._w_lows      = self.query_one("#lows-table", DataTable)
+        self._w_momentum  = self.query_one("#momentum-chart", Static)
+        self._w_spy       = self.query_one("#spy-chart", Static)
         if self._equity_provider and self._crypto_provider:
             self._w_mode_toggle = self.query_one("#mode-toggle", Static)
         for table in (self._w_highs, self._w_lows):
@@ -359,6 +386,162 @@ class HighLowTUI(App):
         self._highs_dirty = len(new_high_entries) > 0
         self._lows_dirty = len(new_low_entries) > 0
 
+    @staticmethod
+    def _compute_momentum_score(high_counts: dict, low_counts: dict) -> float:
+        """Weighted momentum: recent timeframes count more.
+        Score > 0 = more new highs, Score < 0 = more new lows.
+        """
+        h1  = high_counts.get("1m",  0);  l1  = low_counts.get("1m",  0)
+        h5  = high_counts.get("5m",  0);  l5  = low_counts.get("5m",  0)
+        h20 = high_counts.get("20m", 0);  l20 = low_counts.get("20m", 0)
+        return 4 * (h1 - l1) + 2 * (h5 - l5) + (h20 - l20)
+
+    SPY_SAMPLE_INTERVAL = 15  # seconds between SPY price samples
+
+    def _update_momentum(self, high_counts: dict, low_counts: dict) -> None:
+        score = self._compute_momentum_score(high_counts, low_counts)
+        spy   = (self.last_state.get("indexPrices") or {}).get("SPY", 0.0)
+        now   = time.time()
+        self._momentum_history.append((now, score))
+        # Sample SPY at fixed intervals so the chart has a uniform time axis
+        if spy and (not self._spy_history or now - self._spy_history[-1][0] >= self.SPY_SAMPLE_INTERVAL):
+            self._spy_history.append((now, spy))
+        # Prune both to rolling 20-min window
+        cutoff = now - MOMENTUM_WINDOW
+        while self._momentum_history and self._momentum_history[0][0] < cutoff:
+            self._momentum_history.popleft()
+        while self._spy_history and self._spy_history[0][0] < cutoff:
+            self._spy_history.popleft()
+        self._render_momentum_chart()
+        self._render_spy_chart()
+
+    def _render_momentum_chart(self) -> None:
+        if not self._w_momentum:
+            return
+        history = list(self._momentum_history)
+        if not history:
+            self._w_momentum.update(Text("Waiting for data...", style="dim"))
+            return
+
+        width   = max(self._w_momentum.size.width  or 60, 4)
+        height  = max(self._w_momentum.size.height or 20, 4)
+        chart_h = max(height - 1, 3)  # top row reserved for score label
+
+        # Fit history to available width
+        scores = [s for _, s in history]
+        if len(scores) > width:
+            step = len(scores) / width
+            scores = [scores[int(i * step)] for i in range(width)]
+        else:
+            scores = [0.0] * (width - len(scores)) + scores
+
+        # Symmetric Y axis with 10% padding so line never touches edges
+        span = max(abs(s) for s in scores) or 1.0
+        y_min, y_max = -span * 1.1, span * 1.1
+
+        def to_row(s: float) -> int:
+            frac = 1.0 - (s - y_min) / (y_max - y_min)
+            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+
+        zero_row = to_row(0.0)
+        point_rows = [to_row(s) for s in scores]
+
+        # Build character grid
+        grid = [[" "] * width for _ in range(chart_h)]
+        for c in range(width):
+            grid[zero_row][c] = "─"  # zero line (overwritten by data if needed)
+
+        for c, r in enumerate(point_rows):
+            if c > 0:
+                prev_r = point_rows[c - 1]
+                for fill_r in range(min(prev_r, r), max(prev_r, r) + 1):
+                    grid[fill_r][c] = "●" if fill_r == r else "│"
+            else:
+                grid[r][c] = "●"
+
+        # Render with color: above zero = green, below = red
+        current = scores[-1]
+        sign  = "+" if current > 0 else ""
+        color = "green" if current > 0 else ("red" if current < 0 else "white")
+
+        out = Text()
+        out.append(f"Score: {sign}{current:.0f}\n", style=f"bold {color}")
+        for r_idx, row in enumerate(grid):
+            line = Text(overflow="fold")
+            for char in row:
+                if char in ("●", "│"):
+                    line.append(char, style="green" if r_idx < zero_row else "red")
+                elif char == "─":
+                    line.append(char, style="dim")
+                else:
+                    line.append(char)
+            out.append_text(line)
+            out.append("\n")
+
+        self._w_momentum.update(out)
+
+    def _render_spy_chart(self) -> None:
+        if not self._w_spy:
+            return
+        history = list(self._spy_history)
+        if not history:
+            self._w_spy.update(Text("Waiting for SPY...", style="dim"))
+            return
+
+        width   = max(self._w_spy.size.width  or 60, 4)
+        height  = max(self._w_spy.size.height or 10, 4)
+        chart_h = max(height - 1, 3)  # top row reserved for price label
+
+        # Fit history to available width
+        prices = [p for _, p in history]
+        if len(prices) > width:
+            step = len(prices) / width
+            prices = [prices[int(i * step)] for i in range(width)]
+        else:
+            prices = [prices[0]] * (width - len(prices)) + prices
+
+        p_min, p_max = min(prices), max(prices)
+        span  = (p_max - p_min) or 1.0
+        y_min = p_min - span * 0.1
+        y_max = p_max + span * 0.1
+
+        def to_row(p: float) -> int:
+            frac = 1.0 - (p - y_min) / (y_max - y_min)
+            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+
+        point_rows = [to_row(p) for p in prices]
+
+        # Build grid
+        grid = [[" "] * width for _ in range(chart_h)]
+        for c, r in enumerate(point_rows):
+            if c > 0:
+                prev_r = point_rows[c - 1]
+                for fill_r in range(min(prev_r, r), max(prev_r, r) + 1):
+                    grid[fill_r][c] = "●" if fill_r == r else "│"
+            else:
+                grid[r][c] = "●"
+
+        # Color by trend vs 20m-window open
+        baseline = prices[0]
+        current  = prices[-1]
+        color    = "green" if current >= baseline else "red"
+        delta    = current - baseline
+        sign     = "+" if delta >= 0 else ""
+
+        out = Text()
+        out.append(f"SPY {current:.2f}  {sign}{delta:.2f}\n", style=f"bold {color}")
+        for row in grid:
+            line = Text(overflow="fold")
+            for char in row:
+                if char in ("●", "│"):
+                    line.append(char, style=color)
+                else:
+                    line.append(char)
+            out.append_text(line)
+            out.append("\n")
+
+        self._w_spy.update(out)
+
     def _refresh_status(self):
         dot = "[green]●[/green]" if self.connection_status == "connected" else "[red]●[/red]"
         name = self._provider.get_metadata()["name"]
@@ -373,13 +556,18 @@ class HighLowTUI(App):
         self._ticker_offset = (self._ticker_offset + 1) % n
 
     def _build_ticker_text(self) -> None:
+        # Merge highs and lows, sort by timestamp newest-first (matches tables)
+        tagged = (
+            [(e, "high") for e in self.session_highs[:25]] +
+            [(e, "low")  for e in self.session_lows[:25]]
+        )
+        tagged.sort(key=lambda x: x[0].get("timestamp", 0), reverse=True)
         t = Text()
-        for e in self.session_highs[:25]:
-            pct = e.get("percentChange") or 0
-            t.append(f"  {e['symbol']} ▲{e['price']:.2f} ({pct:+.2f}%)  ", style="green")
-        for e in self.session_lows[:25]:
-            pct = e.get("percentChange") or 0
-            t.append(f"  {e['symbol']} ▼{e['price']:.2f} ({pct:+.2f}%)  ", style="red")
+        for e, kind in tagged[:50]:
+            pct   = e.get("percentChange") or 0
+            arrow = "▲" if kind == "high" else "▼"
+            style = "green" if kind == "high" else "red"
+            t.append(f"  {e['symbol']} {arrow}{e['price']:.2f} ({pct:+.2f}%)  ", style=style)
         if not len(t):
             t.append("  Waiting for data...  ", style="dim")
         self._ticker_text = t
@@ -430,6 +618,7 @@ class HighLowTUI(App):
         low_counts = self.last_state.get("lowCounts") or {}
         bar_width = self._w_rate_bars.size.width or 80
         self._w_rate_bars.update(self._render_rate_bars(high_counts, low_counts, bar_width))
+        self._update_momentum(high_counts, low_counts)
 
         thresholds = self.highlight_config.get("thresholds", {})
 

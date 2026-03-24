@@ -82,6 +82,10 @@ class TradierProvider:
     async def connect(self) -> None:
         self._stop_event.clear()
         await self._seed_from_rest()
+        # Ensure index symbols are always seeded even if absent from the watchlist
+        missing = [s for s in ("SPY", "DIA", "QQQ") if s not in self._open_prices]
+        if missing:
+            await self._fetch_quotes(missing)
         # Start one SSE reader per chunk, each with its own session ID
         chunks = [self.symbols[i:i + self.SSE_CHUNK]
                   for i in range(0, len(self.symbols), self.SSE_CHUNK)]
