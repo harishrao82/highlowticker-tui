@@ -5,17 +5,13 @@ from typing import Callable, Awaitable, List, Dict
 
 
 def wall_clock_counts(timestamps: List[float]) -> Dict[str, int]:
-    """Count timestamps in wall-clock-aligned windows.
-
-    A 30s window runs from :00 to :29 and :30 to :59 of each minute —
-    it snaps to calendar boundaries, not rolling from the most recent tick.
-    """
+    """Count timestamps in rolling windows ending at now."""
     now = time.time()
     return {
-        "30s": sum(1 for t in timestamps if t >= now - (now % 30)),
-        "1m":  sum(1 for t in timestamps if t >= now - (now % 60)),
-        "5m":  sum(1 for t in timestamps if t >= now - (now % 300)),
-        "20m": sum(1 for t in timestamps if t >= now - (now % 1200)),
+        "30s": sum(1 for t in timestamps if t >= now - 30),
+        "1m":  sum(1 for t in timestamps if t >= now - 60),
+        "5m":  sum(1 for t in timestamps if t >= now - 300),
+        "20m": sum(1 for t in timestamps if t >= now - 1200),
     }
 
 

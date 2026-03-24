@@ -54,10 +54,9 @@ class TradierProvider:
             "Accept": "application/json",
         }
 
-        self._session_id: Optional[str] = None
         self._queue: asyncio.Queue = asyncio.Queue()
         self._stop_event = asyncio.Event()
-        self._sse_task: Optional[asyncio.Task] = None
+        self._sse_tasks: List[asyncio.Task] = []
         self._reseed_task: Optional[asyncio.Task] = None
 
         # Session tracking
@@ -76,11 +75,20 @@ class TradierProvider:
     # DataProvider protocol
     # ------------------------------------------------------------------
 
+    # Tradier SSE rejects requests with symbol params over ~1330 chars.
+    # 300 symbols stays safely under that limit for typical ticker lengths.
+    SSE_CHUNK = 300
+
     async def connect(self) -> None:
         self._stop_event.clear()
-        self._session_id = await self._create_stream_session()
         await self._seed_from_rest()
-        self._sse_task    = asyncio.create_task(self._sse_reader())
+        # Start one SSE reader per chunk, each with its own session ID
+        chunks = [self.symbols[i:i + self.SSE_CHUNK]
+                  for i in range(0, len(self.symbols), self.SSE_CHUNK)]
+        self._sse_tasks = []
+        for chunk in chunks:
+            session_id = await self._create_stream_session()
+            self._sse_tasks.append(asyncio.create_task(self._sse_reader(session_id, chunk)))
         self._reseed_task = asyncio.create_task(self._market_open_reseed())
 
     async def stream(self) -> AsyncIterator[dict]:
@@ -102,14 +110,14 @@ class TradierProvider:
 
     async def disconnect(self) -> None:
         self._stop_event.set()
-        for task in (self._sse_task, self._reseed_task):
+        for task in (*self._sse_tasks, self._reseed_task):
             if task and not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
-        self._sse_task = None
+        self._sse_tasks = []
         self._reseed_task = None
 
     def get_metadata(self) -> dict:
@@ -211,19 +219,22 @@ class TradierProvider:
         except asyncio.CancelledError:
             pass
 
-    async def _sse_reader(self) -> None:
-        """Background task: read Tradier SSE stream and push raw JSON lines to queue."""
-        sym_str = ",".join(self.symbols)
+    async def _sse_reader(self, session_id: str, symbols: List[str]) -> None:
+        """Background task: read one Tradier SSE connection and push lines to the shared queue."""
         url = f"{self._stream_base}/markets/events"
         params = {
-            "symbols": sym_str,
-            "sessionid": self._session_id,
+            "symbols": ",".join(symbols),
+            "sessionid": session_id,
             "linebreak": "true",
             "filter": "trade,quote",
         }
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("GET", url, headers=self._headers, params=params) as resp:
+                    if resp.status_code != 200:
+                        print(f"[TradierProvider] SSE returned {resp.status_code} "
+                              f"for {len(symbols)} symbols", file=sys.stderr)
+                        return
                     async for line in resp.aiter_lines():
                         if self._stop_event.is_set():
                             break
