@@ -24,16 +24,16 @@ def _require_env(*names: str, broker: str, docs_url: str) -> Dict[str, str]:
 
 
 def load_equity_provider(broker: str, symbols: List[str]):
-    """Return a DataProvider instance for the given equity broker.
+    """Return a DataProvider instance for the given equity broker."""
+    if broker == "tradier":
+        creds = _require_env(
+            "TRADIER_ACCESS_TOKEN",
+            broker=broker, docs_url=DOCS_URL,
+        )
+        from providers.tradier_provider import TradierProvider
+        return TradierProvider(creds["TRADIER_ACCESS_TOKEN"], symbols)
 
-    Equity providers are available in HighlowTicker Pro.
-    See https://highlowtick.com to upgrade.
-    """
-    raise ProviderLoadError(
-        f"[HighlowTicker] Equity broker '{broker}' requires HighlowTicker Pro.\n"
-        f"  Upgrade at: https://highlowtick.com\n"
-        f"  (Crypto via Coinbase is free — set [crypto] broker = \"coinbase\" in config.toml)"
-    )
+    raise ProviderLoadError(f"Unknown equity broker: {broker}")
 
 
 def load_crypto_provider(broker: str, symbols: List[str]):

@@ -9,7 +9,7 @@ except ImportError:
 
 CONFIG_PATH = Path.home() / ".highlowticker" / "config.toml"
 
-EQUITY_BROKERS: set = set()  # Equity brokers require HighlowTicker Pro — https://highlowtick.com
+EQUITY_BROKERS = {"tradier"}
 CRYPTO_BROKERS = {"coinbase"}
 
 
@@ -26,18 +26,16 @@ def load_config() -> dict:
 
 
 def get_equity_broker(cfg: dict) -> Optional[str]:
-    """Return equity broker name or None if not configured.
-
-    Equity brokers are only available in HighlowTicker Pro.
-    See https://highlowtick.com to upgrade.
-    """
+    """Return equity broker name or None if not configured."""
     broker = cfg.get("equity", {}).get("broker")
     if broker is None:
         return None
-    raise ConfigError(
-        f"Equity broker '{broker}' requires HighlowTicker Pro.\n"
-        f"  Upgrade at: https://highlowtick.com"
-    )
+    if broker not in EQUITY_BROKERS:
+        raise ConfigError(
+            f"Unknown equity broker '{broker}'. Valid options: {sorted(EQUITY_BROKERS)}\n"
+            f"  See setup guide: https://highlowtick.com/#brokers"
+        )
+    return broker
 
 
 def get_crypto_broker(cfg: dict) -> Optional[str]:
