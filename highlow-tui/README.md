@@ -6,6 +6,8 @@ Tracks every stock making a new intraday high or low — color-coded by frequenc
 
 ![screenshot placeholder]
 
+Live demo: **[highlowtick.com](https://highlowtick.com)**
+
 ---
 
 ## Quickstart
