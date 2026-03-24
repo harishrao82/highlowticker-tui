@@ -248,6 +248,7 @@ class HighLowTUI(App):
         self._w_mode_toggle = None
         self._momentum_history: deque = deque()  # [(timestamp, score), ...]
         self._spy_history:      deque = deque()  # [(timestamp, price), ...]
+        self._last_valid_spy:   float = 0.0      # last non-zero SPY price seen
         self._ticker_text    = Text("")
         self._ticker_doubled = Text("")
         self._ticker_offset  = 0
@@ -400,7 +401,10 @@ class HighLowTUI(App):
 
     def _update_momentum(self, high_counts: dict, low_counts: dict) -> None:
         score = self._compute_momentum_score(high_counts, low_counts)
-        spy   = (self.last_state.get("indexPrices") or {}).get("SPY", 0.0)
+        raw_spy = (self.last_state.get("indexPrices") or {}).get("SPY", 0.0)
+        if raw_spy and raw_spy > 1.0:
+            self._last_valid_spy = raw_spy
+        spy = self._last_valid_spy
         now   = time.time()
         self._momentum_history.append((now, score))
         # Sample SPY at fixed intervals so the chart has a uniform time axis
