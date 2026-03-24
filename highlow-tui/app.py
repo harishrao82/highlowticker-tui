@@ -487,7 +487,7 @@ class HighLowTUI(App):
     def _render_spy_chart(self) -> None:
         if not self._w_spy:
             return
-        history = list(self._spy_history)
+        history = [(t, p) for t, p in self._spy_history if p > 1.0]
         if not history:
             self._w_spy.update(Text("Waiting for SPY...", style="dim"))
             return
