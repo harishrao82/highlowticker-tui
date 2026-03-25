@@ -39,7 +39,7 @@ RATE_TIMEFRAMES = ["20m", "5m", "1m", "30s"]
 MOMENTUM_WINDOW = 1200  # seconds of history to keep (20 min)
 
 CHART_Y_W           = 8    # y-axis column width (chars including separator │)
-CHART_VIEW_SECS     = 7200 # 2-hour viewport window
+CHART_VIEW_SECS     = 1800 # 30-minute viewport window
 CHART_SCROLL_STEP   = 300  # seconds per scroll keypress (5 min)
 CHART_RENDER_INTERVAL = 0.5  # max chart render rate (seconds) — prevents lag at high event rates
 
