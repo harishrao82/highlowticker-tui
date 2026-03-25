@@ -488,16 +488,11 @@ class HighLowTUI(App):
                 c = max(0, min(chart_w - 1, round((t - view_start) / span * (chart_w - 1))))
                 buckets[c].append(v)
         vals = [sum(b) / len(b) if b else None for b in buckets]
-        # Forward fill
+        # Forward fill gaps within the data range only.
+        # Leading Nones (before first data point) are intentionally left as None
+        # so the line only draws where real data exists.
         last = None
         for i in range(chart_w):
-            if vals[i] is not None:
-                last = vals[i]
-            elif last is not None:
-                vals[i] = last
-        # Backward fill leading Nones
-        last = None
-        for i in range(chart_w - 1, -1, -1):
             if vals[i] is not None:
                 last = vals[i]
             elif last is not None:
