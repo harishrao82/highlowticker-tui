@@ -476,6 +476,41 @@ class HighLowTUI(App):
         return marks
 
     @staticmethod
+    def _series_to_cols(history, view_start: float, view_end: float, chart_w: int):
+        """Bucket (ts, value) history into chart_w column averages, forward/back fill gaps."""
+        buckets: list = [[] for _ in range(chart_w)]
+        span = view_end - view_start
+        for t, v in history:
+            if view_start <= t <= view_end:
+                c = max(0, min(chart_w - 1, round((t - view_start) / span * (chart_w - 1))))
+                buckets[c].append(v)
+        vals = [sum(b) / len(b) if b else None for b in buckets]
+        # Forward fill
+        last = None
+        for i in range(chart_w):
+            if vals[i] is not None:
+                last = vals[i]
+            elif last is not None:
+                vals[i] = last
+        # Backward fill leading Nones
+        last = None
+        for i in range(chart_w - 1, -1, -1):
+            if vals[i] is not None:
+                last = vals[i]
+            elif last is not None:
+                vals[i] = last
+        return vals
+
+    @staticmethod
+    def _apply_sma(vals: list, period: int = 9) -> list:
+        """Simple moving average over a list that may contain None entries."""
+        result = []
+        for i in range(len(vals)):
+            window = [v for v in vals[max(0, i - period + 1): i + 1] if v is not None]
+            result.append(sum(window) / len(window) if window else None)
+        return result
+
+    @staticmethod
     def _ohlc_1min(history, view_start: float, view_end: float):
         """Bucket [(ts, value)] into 1-minute OHLC candles within the viewport."""
         from collections import defaultdict
@@ -581,34 +616,77 @@ class HighLowTUI(App):
         out = Text()
         out.append("MOMENTUM  ", style="bold dim white")
         out.append(f"Score: {sign}{current_score:.0f}", style=f"bold {score_color}")
+        out.append("  SMA9", style="dim")
         out.append(scroll_tag, style="dim yellow")
         out.append("\n")
 
-        # Pre-filter to viewport so _ohlc_1min doesn't iterate the full 30k deque
         history_view = [(t, s) for t, s in self._momentum_history if t >= view_start]
-        candles = self._ohlc_1min(history_view, view_start, view_end)
 
-        if not candles:
+        if not history_view:
             out.append("  No data in this window\n", style="dim")
             self._w_momentum.update(out)
             return
 
-        all_vals = ([c["high"] for c in candles] + [c["low"] for c in candles])
-        span     = max(abs(v) for v in all_vals) or 1.0
-        y_max    = span * 1.1
-        y_min    = -y_max
+        raw_vals = self._series_to_cols(history_view, view_start, view_end, chart_w)
+        sma_vals = self._apply_sma(raw_vals, 9)
+
+        all_vals = [v for v in sma_vals if v is not None]
+        if not all_vals:
+            out.append("  No data in this window\n", style="dim")
+            self._w_momentum.update(out)
+            return
+
+        span   = max(abs(v) for v in all_vals) or 1.0
+        y_max  = span * 1.1
+        y_min  = -y_max
 
         def to_row_m(v: float) -> int:
             frac = 1.0 - (v - y_min) / (y_max - y_min)
             return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
 
         zero_row    = to_row_m(0.0)
-        current_row = to_row_m(current_score)
+        current_sma = next((v for v in reversed(sma_vals) if v is not None), current_score)
+        current_row = to_row_m(current_sma)
 
-        grid = self._build_candle_grid(
-            candles, view_start, view_end, chart_w, chart_h, y_min, y_max,
-            zero_row=zero_row, current_row=current_row,
-        )
+        DIM_GRID = "#1e3a1e"
+        grid = [[("·", DIM_GRID)] * chart_w for _ in range(chart_h)]
+
+        # Zero line
+        for c in range(chart_w):
+            grid[zero_row][c] = ("─", "dim white")
+
+        # Raw data line — dim, dots only, no connectors
+        for c, v in enumerate(raw_vals):
+            if v is not None:
+                r = to_row_m(v)
+                if grid[r][c][0] == "·":
+                    grid[r][c] = ("·", "#2a5a2a" if v >= 0 else "#5a2a2a")
+
+        # SMA line — bright, with vertical connectors
+        prev_r = None
+        for c, v in enumerate(sma_vals):
+            if v is None:
+                prev_r = None
+                continue
+            r = to_row_m(v)
+            sma_color = "bright_green" if v >= 0 else "bright_red"
+            if prev_r is not None:
+                lo, hi = min(prev_r, r), max(prev_r, r)
+                for fill_r in range(lo, hi + 1):
+                    ch = "●" if fill_r == r else "│"
+                    fc = "bright_green" if fill_r <= zero_row else "bright_red"
+                    if 0 <= c < chart_w:
+                        grid[fill_r][c] = (ch, fc)
+            else:
+                if 0 <= c < chart_w:
+                    grid[r][c] = ("●", sma_color)
+            prev_r = r
+
+        # Current-value line — teal dashes only in empty cells
+        if 0 <= current_row < chart_h:
+            for c in range(chart_w):
+                if grid[current_row][c][0] == "·":
+                    grid[current_row][c] = ("─", "#3a6060")
 
         y_lbl = {
             0:            f"{y_max:+.0f}",
@@ -621,8 +699,7 @@ class HighLowTUI(App):
             for ch, st in row:
                 line.append(ch, style=st)
             if r_idx == current_row:
-                # Floating current-score label; overrides any static label at this row
-                lbl = f"{sign}{current_score:.0f}"
+                lbl = f"{sign}{current_sma:.0f}"
                 line.append(f"{lbl:>{CHART_Y_W - 1}}", style=f"bold {score_color}")
                 line.append("◄", style=f"bold {score_color}")
             else:
@@ -632,7 +709,6 @@ class HighLowTUI(App):
             out.append_text(line)
             out.append("\n")
 
-        DIM_GRID = "#1e3a1e"
         marks   = self._x_axis_marks(view_start, view_end, chart_w)
         x_chars: dict = {}
         for col, label, is_30min in marks:
@@ -671,9 +747,8 @@ class HighLowTUI(App):
                        if self._chart_offset_secs else "  LIVE")
 
         spy_history = [(t, p) for t, p in self._spy_history if p > 1.0 and t >= view_start]
-        candles = self._ohlc_1min(spy_history, view_start, view_end)
 
-        if not candles:
+        if not spy_history:
             out = Text()
             out.append("SPY  ", style="bold dim white")
             out.append(f"{current_spy:.2f}", style="bold bright_cyan")
@@ -683,47 +758,79 @@ class HighLowTUI(App):
             self._w_spy.update(out)
             return
 
-        all_highs = [c["high"] for c in candles]
-        all_lows  = [c["low"]  for c in candles]
-        p_min = min(all_lows)
-        p_max = max(all_highs)
+        raw_vals = self._series_to_cols(spy_history, view_start, view_end, chart_w)
+        sma_vals = self._apply_sma(raw_vals, 9)
 
+        valid = [v for v in sma_vals if v is not None]
+        if not valid:
+            return
+
+        p_min, p_max = min(valid), max(valid)
         min_span = max(current_spy, p_max) * 0.003
         span     = max(p_max - p_min, min_span)
         center   = (p_max + p_min) / 2
         y_min    = center - span * 0.6
         y_max    = center + span * 0.6
 
-        baseline    = candles[0]["open"]
-        last_close  = candles[-1]["close"]
-        delta       = last_close - baseline
+        def to_row_spy(p: float) -> int:
+            frac = 1.0 - (p - y_min) / (y_max - y_min)
+            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+
+        current_sma = next((v for v in reversed(sma_vals) if v is not None), current_spy)
+        current_row = to_row_spy(current_spy) if current_spy > 1.0 else -1
+        baseline    = next((v for v in sma_vals if v is not None), current_sma)
+        delta       = current_sma - baseline
         sign        = "+" if delta >= 0 else ""
-        delta_color = "bright_green" if delta >= 0 else "bright_red"
+        line_color  = "bright_green" if delta >= 0 else "bright_red"
+        delta_color = line_color
 
         out = Text()
         out.append("SPY  ", style="bold dim white")
         out.append(f"{current_spy:.2f}  ", style="bold bright_cyan")
         out.append(f"{sign}{delta:.2f}", style=f"bold {delta_color}")
+        out.append("  SMA9", style="dim")
         out.append(scroll_tag, style="dim yellow")
         out.append("\n")
 
-        mid_row = chart_h // 2
+        DIM_GRID = "#1e3a1e"
+        mid_row  = chart_h // 2
+        grid     = [[("·", DIM_GRID)] * chart_w for _ in range(chart_h)]
 
-        def to_row_spy(p: float) -> int:
-            frac = 1.0 - (p - y_min) / (y_max - y_min)
-            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+        # Raw data line — dim dots, no connectors
+        for c, v in enumerate(raw_vals):
+            if v is not None:
+                r = to_row_spy(v)
+                if grid[r][c][0] == "·":
+                    grid[r][c] = ("·", "#2a4a4a")
 
-        current_row = to_row_spy(current_spy) if current_spy > 1.0 else -1
+        # SMA line — bright, with vertical connectors
+        prev_r = None
+        for c, v in enumerate(sma_vals):
+            if v is None:
+                prev_r = None
+                continue
+            r = to_row_spy(v)
+            if prev_r is not None:
+                lo, hi = min(prev_r, r), max(prev_r, r)
+                for fill_r in range(lo, hi + 1):
+                    ch = "●" if fill_r == r else "│"
+                    if 0 <= c < chart_w:
+                        grid[fill_r][c] = (ch, line_color)
+            else:
+                if 0 <= c < chart_w:
+                    grid[r][c] = ("●", line_color)
+            prev_r = r
 
-        grid = self._build_candle_grid(
-            candles, view_start, view_end, chart_w, chart_h, y_min, y_max,
-            current_row=current_row,
-        )
+        # Current-value line
+        if 0 <= current_row < chart_h:
+            for c in range(chart_w):
+                if grid[current_row][c][0] == "·":
+                    grid[current_row][c] = ("─", "#3a6060")
 
         y_lbl = {
-            0:            f"{y_max:.2f}",
-            mid_row:      f"{(y_max + y_min) / 2:.2f}",
-            chart_h - 1:  f"{y_min:.2f}",
+            0:       f"{y_max:.2f}",
+            mid_row: f"{(y_max + y_min) / 2:.2f}",
+            chart_h - 1: f"{y_min:.2f}",
         }
 
         for r_idx, row in enumerate(grid):
@@ -741,7 +848,6 @@ class HighLowTUI(App):
             out.append_text(line)
             out.append("\n")
 
-        DIM_GRID = "#1e3a1e"
         marks   = self._x_axis_marks(view_start, view_end, chart_w)
         x_chars: dict = {}
         for col, label, is_30min in marks:
