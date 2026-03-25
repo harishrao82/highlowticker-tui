@@ -451,6 +451,83 @@ class HighLowTUI(App):
             t += step
         return marks
 
+    @staticmethod
+    def _ohlc_1min(history, view_start: float, view_end: float):
+        """Bucket [(ts, value)] into 1-minute OHLC candles within the viewport."""
+        from collections import defaultdict
+        buckets: dict = defaultdict(list)
+        for ts, val in history:
+            if view_start <= ts <= view_end:
+                bucket = int(ts // 60) * 60
+                buckets[bucket].append((ts, val))
+        candles = []
+        for bucket_ts in sorted(buckets):
+            items = sorted(buckets[bucket_ts])
+            vals = [v for _, v in items]
+            candles.append({
+                "bucket_ts": bucket_ts,
+                "open":  vals[0],
+                "high":  max(vals),
+                "low":   min(vals),
+                "close": vals[-1],
+            })
+        return candles
+
+    @staticmethod
+    def _build_candle_grid(candles, view_start: float, view_end: float,
+                           chart_w: int, chart_h: int,
+                           y_min: float, y_max: float,
+                           zero_row: int = -1):
+        """
+        Render OHLC candles into a grid[row][col] = (char, style_str).
+        zero_row >= 0 draws a dashed zero line behind candles.
+        """
+        DIM_GRID = "#1e3a1e"
+        grid = [[("·", DIM_GRID)] * chart_w for _ in range(chart_h)]
+
+        def to_row(val: float) -> int:
+            frac = 1.0 - (val - y_min) / (y_max - y_min)
+            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+
+        # Zero line (drawn first, candles paint over it)
+        if 0 <= zero_row < chart_h:
+            for c in range(chart_w):
+                grid[zero_row][c] = ("─", "dim white")
+
+        span_secs = view_end - view_start
+
+        for candle in candles:
+            bt = candle["bucket_ts"]
+            # Proportional column range for this 1-min bucket
+            c_left  = max(0, round((bt      - view_start) / span_secs * (chart_w - 1)))
+            c_right = min(chart_w - 1, round((bt + 60 - view_start) / span_secs * (chart_w - 1)))
+            c_mid   = (c_left + c_right) // 2
+            gap = 1 if c_right - c_left > 1 else 0  # 1-char gap between candles
+
+            bullish     = candle["close"] >= candle["open"]
+            body_color  = "bright_green" if bullish else "bright_red"
+            wick_color  = "green"        if bullish else "red"
+
+            high_row  = to_row(candle["high"])
+            low_row   = to_row(candle["low"])
+            open_row  = to_row(candle["open"])
+            close_row = to_row(candle["close"])
+            body_top  = min(open_row, close_row)
+            body_bot  = max(open_row, close_row)
+
+            for r in range(high_row, low_row + 1):
+                in_body = body_top <= r <= body_bot
+                # Body fills the candle width (leaving gap on right)
+                if in_body:
+                    for c in range(c_left, c_right - gap + 1):
+                        if 0 <= c < chart_w:
+                            grid[r][c] = ("█", body_color)
+                # Wick: only in the center column, where body is absent
+                if 0 <= c_mid < chart_w and not in_body:
+                    grid[r][c_mid] = ("│", wick_color)
+
+        return grid
+
     def _render_momentum_chart(self) -> None:
         if not self._w_momentum:
             return
@@ -461,14 +538,14 @@ class HighLowTUI(App):
         width      = max(self._w_momentum.size.width  or 60, CHART_Y_W + 4)
         height     = max(self._w_momentum.size.height or 20, 5)
         chart_w    = width - CHART_Y_W
-        chart_h    = max(height - 2, 3)  # header row + x-axis row
+        chart_h    = max(height - 2, 3)
 
         current_score = self._momentum_history[-1][1] if self._momentum_history else 0.0
-        sign  = "+" if current_score > 0 else ""
+        sign        = "+" if current_score > 0 else ""
         score_color = ("bright_green" if current_score > 0
                        else ("bright_red" if current_score < 0 else "white"))
-        scroll_tag = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
-                      if self._chart_offset_secs else "  LIVE")
+        scroll_tag  = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
+                       if self._chart_offset_secs else "  LIVE")
 
         out = Text()
         out.append("MOMENTUM  ", style="bold dim white")
@@ -476,58 +553,33 @@ class HighLowTUI(App):
         out.append(scroll_tag, style="dim yellow")
         out.append("\n")
 
-        history = [(t, s) for t, s in self._momentum_history
-                   if view_start <= t <= view_end]
+        candles = self._ohlc_1min(list(self._momentum_history), view_start, view_end)
 
-        if not history:
+        if not candles:
             out.append("  No data in this window\n", style="dim")
             self._w_momentum.update(out)
             return
 
-        scores = [s for _, s in history]
-        span   = max(abs(s) for s in scores) or 1.0
-        y_max  = span * 1.1
-        y_min  = -y_max
+        all_vals = ([c["high"] for c in candles] + [c["low"] for c in candles])
+        span     = max(abs(v) for v in all_vals) or 1.0
+        y_max    = span * 1.1
+        y_min    = -y_max
 
-        def to_col(ts: float) -> int:
-            return max(0, min(chart_w - 1,
-                round((ts - view_start) / (view_end - view_start) * (chart_w - 1))))
-
-        def to_row(v: float) -> int:
+        def to_row_m(v: float) -> int:
             frac = 1.0 - (v - y_min) / (y_max - y_min)
             return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
 
-        zero_row = to_row(0.0)
+        zero_row = to_row_m(0.0)
         mid_row  = chart_h // 2
-        points   = [(to_col(t), to_row(s)) for t, s in history]
 
-        # grid: list of list of (char, style)
-        DIM_GRID = "#1e3a1e"
-        grid = [[ ("·", DIM_GRID) ] * chart_w for _ in range(chart_h)]
+        grid = self._build_candle_grid(
+            candles, view_start, view_end, chart_w, chart_h, y_min, y_max,
+            zero_row=zero_row,
+        )
 
-        # zero line
-        for c in range(chart_w):
-            grid[zero_row][c] = ("─", "dim white")
-
-        # data
-        for i, (c, r) in enumerate(points):
-            if i > 0:
-                prev_c, prev_r = points[i - 1]
-                lo, hi = min(prev_r, r), max(prev_r, r)
-                for fill_r in range(lo, hi + 1):
-                    ch = "●" if fill_r == r else "│"
-                    fc = "bright_green" if fill_r <= zero_row else "bright_red"
-                    if 0 <= c < chart_w:
-                        grid[fill_r][c] = (ch, fc)
-            else:
-                if 0 <= c < chart_w:
-                    fc = "bright_green" if r <= zero_row else "bright_red"
-                    grid[r][c] = ("●", fc)
-
-        # y-axis labels
         y_lbl = {
             0:            f"{y_max:+.0f}",
-            zero_row:     "  0",
+            zero_row:     "   0",
             chart_h - 1:  f"{y_min:+.0f}",
         }
 
@@ -541,7 +593,7 @@ class HighLowTUI(App):
             out.append_text(line)
             out.append("\n")
 
-        # x-axis
+        DIM_GRID = "#1e3a1e"
         marks   = self._x_axis_marks(view_start, view_end, chart_w)
         x_chars: dict = {}
         for col, label, is_30min in marks:
@@ -573,52 +625,42 @@ class HighLowTUI(App):
         width      = max(self._w_spy.size.width  or 60, CHART_Y_W + 4)
         height     = max(self._w_spy.size.height or 10, 5)
         chart_w    = width - CHART_Y_W
-        chart_h    = max(height - 2, 3)  # header + x-axis
+        chart_h    = max(height - 2, 3)
 
         current_spy = self._last_valid_spy
         scroll_tag  = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
                        if self._chart_offset_secs else "  LIVE")
 
-        out = Text()
-        out.append("SPY  ", style="bold dim white")
-        out.append(f"{current_spy:.2f}", style="bold bright_cyan")
-        out.append(scroll_tag, style="dim yellow")
-        out.append("\n")
+        spy_history = [(t, p) for t, p in self._spy_history if p > 1.0]
+        candles = self._ohlc_1min(spy_history, view_start, view_end)
 
-        history = [(t, p) for t, p in self._spy_history
-                   if p > 1.0 and view_start <= t <= view_end]
-
-        if not history:
+        if not candles:
+            out = Text()
+            out.append("SPY  ", style="bold dim white")
+            out.append(f"{current_spy:.2f}", style="bold bright_cyan")
+            out.append(scroll_tag, style="dim yellow")
+            out.append("\n")
             out.append("  No data in this window\n", style="dim")
             self._w_spy.update(out)
             return
 
-        prices = [p for _, p in history]
-        p_min, p_max = min(prices), max(prices)
+        all_highs = [c["high"] for c in candles]
+        all_lows  = [c["low"]  for c in candles]
+        p_min = min(all_lows)
+        p_max = max(all_highs)
 
-        # Minimum Y span: 0.3% of price so small moves don't fill the whole chart
         min_span = max(current_spy, p_max) * 0.003
         span     = max(p_max - p_min, min_span)
         center   = (p_max + p_min) / 2
         y_min    = center - span * 0.6
         y_max    = center + span * 0.6
 
-        def to_col(ts: float) -> int:
-            return max(0, min(chart_w - 1,
-                round((ts - view_start) / (view_end - view_start) * (chart_w - 1))))
-
-        def to_row(p: float) -> int:
-            frac = 1.0 - (p - y_min) / (y_max - y_min)
-            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
-
-        points   = [(to_col(t), to_row(p)) for t, p in history]
-        baseline = prices[0]
-        line_color = "bright_green" if current_spy >= baseline else "bright_red"
-        delta  = current_spy - baseline
-        sign   = "+" if delta >= 0 else ""
+        baseline    = candles[0]["open"]
+        last_close  = candles[-1]["close"]
+        delta       = last_close - baseline
+        sign        = "+" if delta >= 0 else ""
         delta_color = "bright_green" if delta >= 0 else "bright_red"
 
-        # Append delta to header (rewrite first line)
         out = Text()
         out.append("SPY  ", style="bold dim white")
         out.append(f"{current_spy:.2f}  ", style="bold bright_cyan")
@@ -626,23 +668,11 @@ class HighLowTUI(App):
         out.append(scroll_tag, style="dim yellow")
         out.append("\n")
 
-        DIM_GRID = "#1e3a1e"
-        mid_row  = chart_h // 2
-        grid     = [[ ("·", DIM_GRID) ] * chart_w for _ in range(chart_h)]
+        mid_row = chart_h // 2
+        grid = self._build_candle_grid(
+            candles, view_start, view_end, chart_w, chart_h, y_min, y_max,
+        )
 
-        for i, (c, r) in enumerate(points):
-            if i > 0:
-                prev_c, prev_r = points[i - 1]
-                lo, hi = min(prev_r, r), max(prev_r, r)
-                for fill_r in range(lo, hi + 1):
-                    ch = "●" if fill_r == r else "│"
-                    if 0 <= c < chart_w:
-                        grid[fill_r][c] = (ch, line_color)
-            else:
-                if 0 <= c < chart_w:
-                    grid[r][c] = ("●", line_color)
-
-        # y-axis labels
         y_lbl = {
             0:            f"{y_max:.2f}",
             mid_row:      f"{(y_max + y_min) / 2:.2f}",
@@ -659,7 +689,7 @@ class HighLowTUI(App):
             out.append_text(line)
             out.append("\n")
 
-        # x-axis
+        DIM_GRID = "#1e3a1e"
         marks   = self._x_axis_marks(view_start, view_end, chart_w)
         x_chars: dict = {}
         for col, label, is_30min in marks:
