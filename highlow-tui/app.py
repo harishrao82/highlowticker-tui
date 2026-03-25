@@ -451,8 +451,11 @@ class HighLowTUI(App):
         # would copy/iterate large deques continuously and lag the asyncio loop.
         if now - self._last_chart_render >= CHART_RENDER_INTERVAL:
             self._last_chart_render = now
-            self._render_momentum_chart()
-            self._render_spy_chart()
+            # Compute viewport once so both charts are locked to the same time window
+            view_end   = now - self._chart_offset_secs
+            view_start = view_end - CHART_VIEW_SECS
+            self._render_momentum_chart(view_start, view_end)
+            self._render_spy_chart(view_start, view_end)
 
     @staticmethod
     def _x_axis_marks(view_start: float, view_end: float, chart_w: int):
@@ -594,13 +597,14 @@ class HighLowTUI(App):
 
         return grid
 
-    def _render_momentum_chart(self) -> None:
+    def _render_momentum_chart(self, view_start: float = None, view_end: float = None) -> None:
         if not self._w_momentum:
             return
 
-        now        = time.time()
-        view_end   = now - self._chart_offset_secs
-        view_start = view_end - CHART_VIEW_SECS
+        if view_end is None:
+            now      = time.time()
+            view_end = now - self._chart_offset_secs
+            view_start = view_end - CHART_VIEW_SECS
         width      = max(self._w_momentum.size.width  or 60, CHART_Y_W + 4)
         height     = max(self._w_momentum.size.height or 20, 5)
         chart_w    = width - CHART_Y_W
@@ -730,13 +734,14 @@ class HighLowTUI(App):
 
         self._w_momentum.update(out)
 
-    def _render_spy_chart(self) -> None:
+    def _render_spy_chart(self, view_start: float = None, view_end: float = None) -> None:
         if not self._w_spy:
             return
 
-        now        = time.time()
-        view_end   = now - self._chart_offset_secs
-        view_start = view_end - CHART_VIEW_SECS
+        if view_end is None:
+            now      = time.time()
+            view_end = now - self._chart_offset_secs
+            view_start = view_end - CHART_VIEW_SECS
         width      = max(self._w_spy.size.width  or 60, CHART_Y_W + 4)
         height     = max(self._w_spy.size.height or 10, 5)
         chart_w    = width - CHART_Y_W
