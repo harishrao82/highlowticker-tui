@@ -38,9 +38,10 @@ RATE_BAR_WIDTH = 18
 RATE_TIMEFRAMES = ["20m", "5m", "1m", "30s"]
 MOMENTUM_WINDOW = 1200  # seconds of history to keep (20 min)
 
-CHART_Y_W       = 8    # y-axis column width (chars including separator │)
-CHART_VIEW_SECS = 1200 # 20-minute viewport window
-CHART_SCROLL_STEP = 300 # seconds per scroll keypress (5 min)
+CHART_Y_W           = 8    # y-axis column width (chars including separator │)
+CHART_VIEW_SECS     = 1200 # 20-minute viewport window
+CHART_SCROLL_STEP   = 300  # seconds per scroll keypress (5 min)
+CHART_RENDER_INTERVAL = 0.5  # max chart render rate (seconds) — prevents lag at high event rates
 
 
 def make_bar(value: float, max_val: float, width: int = RATE_BAR_WIDTH, reverse: bool = False) -> str:
@@ -261,6 +262,7 @@ class HighLowTUI(App):
         self._spy_history:      deque = deque(maxlen=2000)   # full session, ~2k max
         self._last_valid_spy:   float = 0.0      # last non-zero SPY price seen
         self._chart_offset_secs: float = 0.0    # 0 = live, positive = scrolled back
+        self._last_chart_render: float = 0.0    # timestamp of last chart render
         self._ticker_text    = Text("")
         self._ticker_doubled = Text("")
         self._ticker_offset  = 0
@@ -421,7 +423,7 @@ class HighLowTUI(App):
         h20 = high_counts.get("20m", 0);  l20 = low_counts.get("20m", 0)
         return 4 * (h1 - l1) + 2 * (h5 - l5) + (h20 - l20)
 
-    SPY_SAMPLE_INTERVAL = 15  # seconds between SPY price samples
+    SPY_SAMPLE_INTERVAL = 5  # seconds between SPY price samples (5s → ~12 points/min for accurate OHLC)
 
     def _update_momentum(self, high_counts: dict, low_counts: dict) -> None:
         score = self._compute_momentum_score(high_counts, low_counts)
@@ -431,11 +433,14 @@ class HighLowTUI(App):
         spy = self._last_valid_spy
         now   = time.time()
         self._momentum_history.append((now, score))
-        # Sample SPY at fixed intervals so the chart has a uniform time axis
         if spy and (not self._spy_history or now - self._spy_history[-1][0] >= self.SPY_SAMPLE_INTERVAL):
             self._spy_history.append((now, spy))
-        self._render_momentum_chart()
-        self._render_spy_chart()
+        # Throttle chart renders: at high event rates (20-50/sec) rendering every event
+        # would copy/iterate large deques continuously and lag the asyncio loop.
+        if now - self._last_chart_render >= CHART_RENDER_INTERVAL:
+            self._last_chart_render = now
+            self._render_momentum_chart()
+            self._render_spy_chart()
 
     @staticmethod
     def _x_axis_marks(view_start: float, view_end: float, chart_w: int):
@@ -553,7 +558,9 @@ class HighLowTUI(App):
         out.append(scroll_tag, style="dim yellow")
         out.append("\n")
 
-        candles = self._ohlc_1min(list(self._momentum_history), view_start, view_end)
+        # Pre-filter to viewport so _ohlc_1min doesn't iterate the full 30k deque
+        history_view = [(t, s) for t, s in self._momentum_history if t >= view_start]
+        candles = self._ohlc_1min(history_view, view_start, view_end)
 
         if not candles:
             out.append("  No data in this window\n", style="dim")
@@ -631,7 +638,7 @@ class HighLowTUI(App):
         scroll_tag  = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
                        if self._chart_offset_secs else "  LIVE")
 
-        spy_history = [(t, p) for t, p in self._spy_history if p > 1.0]
+        spy_history = [(t, p) for t, p in self._spy_history if p > 1.0 and t >= view_start]
         candles = self._ohlc_1min(spy_history, view_start, view_end)
 
         if not candles:
