@@ -532,45 +532,23 @@ class HighLowTUI(App):
 
         for idx, candle in enumerate(candles):
             c_left, c_right = col_ranges[idx]
-            c_mid = (c_left + c_right) // 2
+            candle_width = c_right - c_left
+            # Leave a 1-char gap on the right so adjacent bars are visually separated;
+            # skip the gap when there is only 1 column available.
+            body_right = c_right - 1 if candle_width > 1 else c_right
 
-            bullish     = candle["close"] >= candle["open"]
-            body_color  = "bright_green" if bullish else "bright_red"
-            wick_color  = "green"        if bullish else "red"
+            bullish    = candle["close"] >= candle["open"]
+            bar_color  = "bright_green" if bullish else "bright_red"
 
-            high_row  = to_row(candle["high"])
-            low_row   = to_row(candle["low"])
-            open_row  = to_row(candle["open"])
-            close_row = to_row(candle["close"])
-            body_top  = min(open_row, close_row)
-            body_bot  = max(open_row, close_row)
+            high_row = to_row(candle["high"])
+            low_row  = to_row(candle["low"])
 
+            # Fill the entire high-to-low range solid — no separate wick/body distinction.
+            # Color alone (green/red) conveys direction; solid fill reads clearly at any width.
             for r in range(high_row, low_row + 1):
-                in_body = body_top <= r <= body_bot
-                # Body fills full candle width, no gap — adjacent candles touch
-                if in_body:
-                    for c in range(c_left, c_right + 1):
-                        if 0 <= c < chart_w:
-                            grid[r][c] = ("█", body_color)
-                # Wick in center column where body is absent
-                if 0 <= c_mid < chart_w and not in_body:
-                    grid[r][c_mid] = ("│", wick_color)
-
-        # Draw close→open connectors between adjacent candles so they look stitched together.
-        # The connector column is the right edge of candle[i]; it bridges the vertical
-        # distance between candle[i].close and candle[i+1].open.
-        for idx in range(len(candles) - 1):
-            _, c_conn = col_ranges[idx]          # right edge of this candle
-            close_r = to_row(candles[idx]["close"])
-            open_r  = to_row(candles[idx + 1]["open"])
-            if close_r == open_r:
-                continue                          # already flush, nothing to draw
-            lo, hi = min(close_r, open_r), max(close_r, open_r)
-            bullish_next = candles[idx + 1]["close"] >= candles[idx + 1]["open"]
-            conn_color = "green" if bullish_next else "red"
-            for r in range(lo, hi + 1):
-                if 0 <= c_conn < chart_w and grid[r][c_conn][0] not in ("█",):
-                    grid[r][c_conn] = ("│", conn_color)
+                for c in range(c_left, body_right + 1):
+                    if 0 <= c < chart_w:
+                        grid[r][c] = ("█", bar_color)
 
         # Current-value line — drawn after candles, only overwrites empty cells
         # so candle bodies/wicks always take visual priority
