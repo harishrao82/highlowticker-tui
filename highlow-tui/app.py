@@ -196,6 +196,11 @@ class HighLowTUI(App):
         border-top: dashed $primary-darken-3;
         overflow: hidden hidden;
     }
+    #system-health {
+        height: 4;
+        border-top: dashed $primary-darken-3;
+        padding: 0 1;
+    }
     DataTable {
         height: 1fr;
     }
@@ -263,6 +268,9 @@ class HighLowTUI(App):
         self._last_valid_spy:   float = 0.0      # last non-zero SPY price seen
         self._chart_offset_secs: float = 0.0    # 0 = live, positive = scrolled back
         self._last_chart_render: float = 0.0    # timestamp of last chart render
+        self._event_count: int = 0
+        self._event_timestamps: deque = deque(maxlen=600)  # last 10 min of event times
+        self._w_health = None
         self._ticker_text    = Text("")
         self._ticker_doubled = Text("")
         self._ticker_offset  = 0
@@ -286,6 +294,7 @@ class HighLowTUI(App):
             with Vertical(id="momentum-box"):
                 yield Static("", id="momentum-chart")
                 yield Static("", id="spy-chart")
+                yield Static("", id="system-health")
             with Vertical(classes="table-box"):
                 yield Static("Session new highs", id="highs-label")
                 yield DataTable(id="highs-table", cursor_type="row", zebra_stripes=True)
@@ -299,6 +308,7 @@ class HighLowTUI(App):
         self._w_lows      = self.query_one("#lows-table", DataTable)
         self._w_momentum  = self.query_one("#momentum-chart", Static)
         self._w_spy       = self.query_one("#spy-chart", Static)
+        self._w_health    = self.query_one("#system-health", Static)
         if self._equity_provider and self._crypto_provider:
             self._w_mode_toggle = self.query_one("#mode-toggle", Static)
         for table in (self._w_highs, self._w_lows):
@@ -412,6 +422,8 @@ class HighLowTUI(App):
         }
         self._highs_dirty = len(new_high_entries) > 0
         self._lows_dirty = len(new_low_entries) > 0
+        self._event_count += 1
+        self._event_timestamps.append(ts)
 
     @staticmethod
     def _compute_momentum_score(high_counts: dict, low_counts: dict) -> float:
@@ -815,6 +827,59 @@ class HighLowTUI(App):
                 key=f"{prefix}_{i}_{e['symbol']}",
             )
 
+    def _refresh_health(self) -> None:
+        if not self._w_health:
+            return
+        now = time.time()
+
+        # Time since last HIGHLOW_UPDATE — primary choking indicator
+        if self.last_update_time:
+            lag = now - self.last_update_time
+            if lag < 3:
+                lag_str, lag_style = f"{lag:.1f}s ago", "bright_green"
+            elif lag < 15:
+                lag_str, lag_style = f"{lag:.1f}s ago", "yellow"
+            else:
+                lag_str, lag_style = f"{lag:.0f}s ago ⚠", "bright_red"
+        else:
+            lag_str, lag_style = "waiting...", "dim"
+
+        # Rolling 60-second event rate
+        cutoff60 = now - 60
+        rate60 = sum(1 for t in self._event_timestamps if t > cutoff60)
+
+        # Uptime
+        uptime_s = int(now - self._start_time)
+        h, rem = divmod(uptime_s, 3600)
+        m, s   = divmod(rem, 60)
+        uptime_str = f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
+
+        provider_name = self._provider.get_metadata()["name"] if self._provider else "—"
+
+        out = Text()
+        # Row 1: last event + rate
+        out.append("LAST EVT ", style="dim")
+        out.append(lag_str, style=f"bold {lag_style}")
+        out.append("   RATE ", style="dim")
+        out.append(f"{rate60}/min", style="bold")
+        out.append("   TOTAL ", style="dim")
+        out.append(f"{self._event_count:,}", style="bold")
+        out.append("\n")
+        # Row 2: data sizes + uptime + provider
+        out.append("HIGHS ", style="dim")
+        out.append(f"{len(self.session_highs)}", style="bold bright_green")
+        out.append("  LOWS ", style="dim")
+        out.append(f"{len(self.session_lows)}", style="bold bright_red")
+        out.append("  MEM ", style="dim")
+        out.append(f"{len(self._momentum_history):,}", style="bold")
+        out.append("/", style="dim")
+        out.append(f"{len(self._spy_history)}", style="bold")
+        out.append("  UP ", style="dim")
+        out.append(uptime_str, style="bold")
+        out.append(f"  {provider_name}", style="dim cyan")
+
+        self._w_health.update(out)
+
     def _refresh_ui(self):
         self._refresh_status()
         # Rate bars — use live widget width so bars fill the terminal
@@ -823,6 +888,7 @@ class HighLowTUI(App):
         bar_width = self._w_rate_bars.size.width or 80
         self._w_rate_bars.update(self._render_rate_bars(high_counts, low_counts, bar_width))
         self._update_momentum(high_counts, low_counts)
+        self._refresh_health()
 
         thresholds = self.highlight_config.get("thresholds", {})
 
