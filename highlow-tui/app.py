@@ -39,7 +39,7 @@ RATE_TIMEFRAMES = ["20m", "5m", "1m", "30s"]
 MOMENTUM_WINDOW = 1200  # seconds of history to keep (20 min)
 
 CHART_Y_W           = 8    # y-axis column width (chars including separator │)
-CHART_VIEW_SECS     = 1200 # 20-minute viewport window
+CHART_VIEW_SECS     = 7200 # 2-hour viewport window
 CHART_SCROLL_STEP   = 300  # seconds per scroll keypress (5 min)
 CHART_RENDER_INTERVAL = 0.5  # max chart render rate (seconds) — prevents lag at high event rates
 
@@ -264,7 +264,7 @@ class HighLowTUI(App):
         self._w_ticker = None
         self._w_mode_toggle = None
         self._momentum_history: deque = deque(maxlen=30000)  # full session, ~30k max
-        self._spy_history:      deque = deque(maxlen=2000)   # full session, ~2k max
+        self._spy_history:      deque = deque(maxlen=5000)   # full session; 5s interval × 5000 = ~7h
         self._last_valid_spy:   float = 0.0      # last non-zero SPY price seen
         self._chart_offset_secs: float = 0.0    # 0 = live, positive = scrolled back
         self._last_chart_render: float = 0.0    # timestamp of last chart render
@@ -456,8 +456,15 @@ class HighLowTUI(App):
 
     @staticmethod
     def _x_axis_marks(view_start: float, view_end: float, chart_w: int):
-        """Return list of (col, label, is_30min) for 5-minute marks in the viewport."""
-        step = 300  # 5-minute marks
+        """Return list of (col, label, is_major) for time marks in the viewport.
+        Tick spacing adapts to viewport duration so labels never crowd together."""
+        duration = view_end - view_start
+        if duration <= 1800:    # ≤ 30 min → every 5 min
+            step = 300
+        elif duration <= 7200:  # ≤ 2 h   → every 15 min
+            step = 900
+        else:                   # > 2 h   → every 30 min
+            step = 1800
         t = math.ceil(view_start / step) * step
         marks = []
         while t <= view_end:
