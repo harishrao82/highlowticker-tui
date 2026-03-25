@@ -5,10 +5,13 @@ Run from highlow-tui directory: python app.py
 """
 import asyncio
 import json
+import math
 import sys
 import time
 from collections import deque
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import os, certifi                             
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())                                  
@@ -28,10 +31,16 @@ from textual.screen import Screen
 from rich.text import Text
 from rich.style import Style
 
+_ET = ZoneInfo("America/New_York")
+
 MAX_TABLE_ROWS = 50
 RATE_BAR_WIDTH = 18
 RATE_TIMEFRAMES = ["20m", "5m", "1m", "30s"]
 MOMENTUM_WINDOW = 1200  # seconds of history to keep (20 min)
+
+CHART_Y_W       = 8    # y-axis column width (chars including separator │)
+CHART_VIEW_SECS = 1200 # 20-minute viewport window
+CHART_SCROLL_STEP = 300 # seconds per scroll keypress (5 min)
 
 
 def make_bar(value: float, max_val: float, width: int = RATE_BAR_WIDTH, reverse: bool = False) -> str:
@@ -203,6 +212,8 @@ class HighLowTUI(App):
         ("s", "settings", "Settings"),
         ("q", "quit", "Quit"),
         ("m", "switch_mode", "Mode"),
+        ("left",  "chart_scroll_back", "◀ chart"),
+        ("right", "chart_scroll_fwd",  "▶ live"),
     ]
 
     def __init__(
@@ -246,9 +257,10 @@ class HighLowTUI(App):
         self._w_spy      = None
         self._w_ticker = None
         self._w_mode_toggle = None
-        self._momentum_history: deque = deque()  # [(timestamp, score), ...]
-        self._spy_history:      deque = deque()  # [(timestamp, price), ...]
+        self._momentum_history: deque = deque(maxlen=30000)  # full session, ~30k max
+        self._spy_history:      deque = deque(maxlen=2000)   # full session, ~2k max
         self._last_valid_spy:   float = 0.0      # last non-zero SPY price seen
+        self._chart_offset_secs: float = 0.0    # 0 = live, positive = scrolled back
         self._ticker_text    = Text("")
         self._ticker_doubled = Text("")
         self._ticker_offset  = 0
@@ -294,6 +306,18 @@ class HighLowTUI(App):
             table.add_column("% Chg", width=8)
         self.set_interval(1 / 12, self._scroll_ticker)
         self._stream_task = asyncio.create_task(self._data_loop())
+
+    def action_chart_scroll_back(self) -> None:
+        oldest = self._momentum_history[0][0] if self._momentum_history else time.time()
+        max_offset = time.time() - oldest - CHART_VIEW_SECS
+        self._chart_offset_secs = min(self._chart_offset_secs + CHART_SCROLL_STEP, max(max_offset, 0))
+        self._render_momentum_chart()
+        self._render_spy_chart()
+
+    def action_chart_scroll_fwd(self) -> None:
+        self._chart_offset_secs = max(0.0, self._chart_offset_secs - CHART_SCROLL_STEP)
+        self._render_momentum_chart()
+        self._render_spy_chart()
 
     async def _data_loop(self) -> None:
         try:
@@ -410,139 +434,250 @@ class HighLowTUI(App):
         # Sample SPY at fixed intervals so the chart has a uniform time axis
         if spy and (not self._spy_history or now - self._spy_history[-1][0] >= self.SPY_SAMPLE_INTERVAL):
             self._spy_history.append((now, spy))
-        # Prune both to rolling 20-min window
-        cutoff = now - MOMENTUM_WINDOW
-        while self._momentum_history and self._momentum_history[0][0] < cutoff:
-            self._momentum_history.popleft()
-        while self._spy_history and self._spy_history[0][0] < cutoff:
-            self._spy_history.popleft()
         self._render_momentum_chart()
         self._render_spy_chart()
+
+    @staticmethod
+    def _x_axis_marks(view_start: float, view_end: float, chart_w: int):
+        """Return list of (col, label, is_30min) for 5-minute marks in the viewport."""
+        step = 300  # 5-minute marks
+        t = math.ceil(view_start / step) * step
+        marks = []
+        while t <= view_end:
+            col = round((t - view_start) / (view_end - view_start) * (chart_w - 1))
+            dt = datetime.fromtimestamp(t, tz=_ET)
+            label = dt.strftime("%H:%M")
+            marks.append((col, label, dt.minute % 30 == 0))
+            t += step
+        return marks
 
     def _render_momentum_chart(self) -> None:
         if not self._w_momentum:
             return
-        history = list(self._momentum_history)
+
+        now        = time.time()
+        view_end   = now - self._chart_offset_secs
+        view_start = view_end - CHART_VIEW_SECS
+        width      = max(self._w_momentum.size.width  or 60, CHART_Y_W + 4)
+        height     = max(self._w_momentum.size.height or 20, 5)
+        chart_w    = width - CHART_Y_W
+        chart_h    = max(height - 2, 3)  # header row + x-axis row
+
+        current_score = self._momentum_history[-1][1] if self._momentum_history else 0.0
+        sign  = "+" if current_score > 0 else ""
+        score_color = ("bright_green" if current_score > 0
+                       else ("bright_red" if current_score < 0 else "white"))
+        scroll_tag = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
+                      if self._chart_offset_secs else "  LIVE")
+
+        out = Text()
+        out.append("MOMENTUM  ", style="bold dim white")
+        out.append(f"Score: {sign}{current_score:.0f}", style=f"bold {score_color}")
+        out.append(scroll_tag, style="dim yellow")
+        out.append("\n")
+
+        history = [(t, s) for t, s in self._momentum_history
+                   if view_start <= t <= view_end]
+
         if not history:
-            self._w_momentum.update(Text("Waiting for data...", style="dim"))
+            out.append("  No data in this window\n", style="dim")
+            self._w_momentum.update(out)
             return
 
-        width   = max(self._w_momentum.size.width  or 60, 4)
-        height  = max(self._w_momentum.size.height or 20, 4)
-        chart_h = max(height - 1, 3)  # top row reserved for score label
-
-        # Fit history to available width
         scores = [s for _, s in history]
-        if len(scores) > width:
-            step = len(scores) / width
-            scores = [scores[int(i * step)] for i in range(width)]
-        else:
-            scores = [0.0] * (width - len(scores)) + scores
+        span   = max(abs(s) for s in scores) or 1.0
+        y_max  = span * 1.1
+        y_min  = -y_max
 
-        # Symmetric Y axis with 10% padding so line never touches edges
-        span = max(abs(s) for s in scores) or 1.0
-        y_min, y_max = -span * 1.1, span * 1.1
+        def to_col(ts: float) -> int:
+            return max(0, min(chart_w - 1,
+                round((ts - view_start) / (view_end - view_start) * (chart_w - 1))))
 
-        def to_row(s: float) -> int:
-            frac = 1.0 - (s - y_min) / (y_max - y_min)
+        def to_row(v: float) -> int:
+            frac = 1.0 - (v - y_min) / (y_max - y_min)
             return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
 
         zero_row = to_row(0.0)
-        point_rows = [to_row(s) for s in scores]
+        mid_row  = chart_h // 2
+        points   = [(to_col(t), to_row(s)) for t, s in history]
 
-        # Build character grid
-        grid = [[" "] * width for _ in range(chart_h)]
-        for c in range(width):
-            grid[zero_row][c] = "─"  # zero line (overwritten by data if needed)
+        # grid: list of list of (char, style)
+        DIM_GRID = "#1e3a1e"
+        grid = [[ ("·", DIM_GRID) ] * chart_w for _ in range(chart_h)]
 
-        for c, r in enumerate(point_rows):
-            if c > 0:
-                prev_r = point_rows[c - 1]
-                for fill_r in range(min(prev_r, r), max(prev_r, r) + 1):
-                    grid[fill_r][c] = "●" if fill_r == r else "│"
+        # zero line
+        for c in range(chart_w):
+            grid[zero_row][c] = ("─", "dim white")
+
+        # data
+        for i, (c, r) in enumerate(points):
+            if i > 0:
+                prev_c, prev_r = points[i - 1]
+                lo, hi = min(prev_r, r), max(prev_r, r)
+                for fill_r in range(lo, hi + 1):
+                    ch = "●" if fill_r == r else "│"
+                    fc = "bright_green" if fill_r <= zero_row else "bright_red"
+                    if 0 <= c < chart_w:
+                        grid[fill_r][c] = (ch, fc)
             else:
-                grid[r][c] = "●"
+                if 0 <= c < chart_w:
+                    fc = "bright_green" if r <= zero_row else "bright_red"
+                    grid[r][c] = ("●", fc)
 
-        # Render with color: above zero = green, below = red
-        current = scores[-1]
-        sign  = "+" if current > 0 else ""
-        color = "green" if current > 0 else ("red" if current < 0 else "white")
+        # y-axis labels
+        y_lbl = {
+            0:            f"{y_max:+.0f}",
+            zero_row:     "  0",
+            chart_h - 1:  f"{y_min:+.0f}",
+        }
 
-        out = Text()
-        out.append(f"Score: {sign}{current:.0f}\n", style=f"bold {color}")
         for r_idx, row in enumerate(grid):
             line = Text(overflow="fold")
-            for char in row:
-                if char in ("●", "│"):
-                    line.append(char, style="green" if r_idx < zero_row else "red")
-                elif char == "─":
-                    line.append(char, style="dim")
-                else:
-                    line.append(char)
+            for ch, st in row:
+                line.append(ch, style=st)
+            lbl = y_lbl.get(r_idx, "")
+            line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
+            line.append("│", style="dim")
             out.append_text(line)
             out.append("\n")
+
+        # x-axis
+        marks   = self._x_axis_marks(view_start, view_end, chart_w)
+        x_chars: dict = {}
+        for col, label, is_30min in marks:
+            for i, ch in enumerate(label):
+                c = col - len(label) // 2 + i
+                if 0 <= c < chart_w:
+                    x_chars[c] = (ch, "bright_white" if is_30min else "dim")
+
+        x_line = Text(overflow="fold")
+        for c in range(chart_w):
+            if c in x_chars:
+                ch, st = x_chars[c]
+                x_line.append(ch, style=st)
+            else:
+                x_line.append("─", style=DIM_GRID)
+        x_line.append(" " * (CHART_Y_W - 1), style="")
+        x_line.append("┘", style="dim")
+        out.append_text(x_line)
 
         self._w_momentum.update(out)
 
     def _render_spy_chart(self) -> None:
         if not self._w_spy:
             return
-        history = [(t, p) for t, p in self._spy_history if p > 1.0]
+
+        now        = time.time()
+        view_end   = now - self._chart_offset_secs
+        view_start = view_end - CHART_VIEW_SECS
+        width      = max(self._w_spy.size.width  or 60, CHART_Y_W + 4)
+        height     = max(self._w_spy.size.height or 10, 5)
+        chart_w    = width - CHART_Y_W
+        chart_h    = max(height - 2, 3)  # header + x-axis
+
+        current_spy = self._last_valid_spy
+        scroll_tag  = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
+                       if self._chart_offset_secs else "  LIVE")
+
+        out = Text()
+        out.append("SPY  ", style="bold dim white")
+        out.append(f"{current_spy:.2f}", style="bold bright_cyan")
+        out.append(scroll_tag, style="dim yellow")
+        out.append("\n")
+
+        history = [(t, p) for t, p in self._spy_history
+                   if p > 1.0 and view_start <= t <= view_end]
+
         if not history:
-            self._w_spy.update(Text("Waiting for SPY...", style="dim"))
+            out.append("  No data in this window\n", style="dim")
+            self._w_spy.update(out)
             return
 
-        width   = max(self._w_spy.size.width  or 60, 4)
-        height  = max(self._w_spy.size.height or 10, 4)
-        chart_h = max(height - 1, 3)  # top row reserved for price label
-
-        # Fit history to available width
         prices = [p for _, p in history]
-        if len(prices) > width:
-            step = len(prices) / width
-            prices = [prices[int(i * step)] for i in range(width)]
-        else:
-            prices = [prices[0]] * (width - len(prices)) + prices
-
         p_min, p_max = min(prices), max(prices)
-        span  = (p_max - p_min) or 1.0
-        y_min = p_min - span * 0.1
-        y_max = p_max + span * 0.1
+
+        # Minimum Y span: 0.3% of price so small moves don't fill the whole chart
+        min_span = max(current_spy, p_max) * 0.003
+        span     = max(p_max - p_min, min_span)
+        center   = (p_max + p_min) / 2
+        y_min    = center - span * 0.6
+        y_max    = center + span * 0.6
+
+        def to_col(ts: float) -> int:
+            return max(0, min(chart_w - 1,
+                round((ts - view_start) / (view_end - view_start) * (chart_w - 1))))
 
         def to_row(p: float) -> int:
             frac = 1.0 - (p - y_min) / (y_max - y_min)
             return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
 
-        point_rows = [to_row(p) for p in prices]
-
-        # Build grid
-        grid = [[" "] * width for _ in range(chart_h)]
-        for c, r in enumerate(point_rows):
-            if c > 0:
-                prev_r = point_rows[c - 1]
-                for fill_r in range(min(prev_r, r), max(prev_r, r) + 1):
-                    grid[fill_r][c] = "●" if fill_r == r else "│"
-            else:
-                grid[r][c] = "●"
-
-        # Color by trend vs 20m-window open
+        points   = [(to_col(t), to_row(p)) for t, p in history]
         baseline = prices[0]
-        current  = prices[-1]
-        color    = "green" if current >= baseline else "red"
-        delta    = current - baseline
-        sign     = "+" if delta >= 0 else ""
+        line_color = "bright_green" if current_spy >= baseline else "bright_red"
+        delta  = current_spy - baseline
+        sign   = "+" if delta >= 0 else ""
+        delta_color = "bright_green" if delta >= 0 else "bright_red"
 
+        # Append delta to header (rewrite first line)
         out = Text()
-        out.append(f"SPY {current:.2f}  {sign}{delta:.2f}\n", style=f"bold {color}")
-        for row in grid:
+        out.append("SPY  ", style="bold dim white")
+        out.append(f"{current_spy:.2f}  ", style="bold bright_cyan")
+        out.append(f"{sign}{delta:.2f}", style=f"bold {delta_color}")
+        out.append(scroll_tag, style="dim yellow")
+        out.append("\n")
+
+        DIM_GRID = "#1e3a1e"
+        mid_row  = chart_h // 2
+        grid     = [[ ("·", DIM_GRID) ] * chart_w for _ in range(chart_h)]
+
+        for i, (c, r) in enumerate(points):
+            if i > 0:
+                prev_c, prev_r = points[i - 1]
+                lo, hi = min(prev_r, r), max(prev_r, r)
+                for fill_r in range(lo, hi + 1):
+                    ch = "●" if fill_r == r else "│"
+                    if 0 <= c < chart_w:
+                        grid[fill_r][c] = (ch, line_color)
+            else:
+                if 0 <= c < chart_w:
+                    grid[r][c] = ("●", line_color)
+
+        # y-axis labels
+        y_lbl = {
+            0:            f"{y_max:.2f}",
+            mid_row:      f"{(y_max + y_min) / 2:.2f}",
+            chart_h - 1:  f"{y_min:.2f}",
+        }
+
+        for r_idx, row in enumerate(grid):
             line = Text(overflow="fold")
-            for char in row:
-                if char in ("●", "│"):
-                    line.append(char, style=color)
-                else:
-                    line.append(char)
+            for ch, st in row:
+                line.append(ch, style=st)
+            lbl = y_lbl.get(r_idx, "")
+            line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
+            line.append("│", style="dim")
             out.append_text(line)
             out.append("\n")
+
+        # x-axis
+        marks   = self._x_axis_marks(view_start, view_end, chart_w)
+        x_chars: dict = {}
+        for col, label, is_30min in marks:
+            for i, ch in enumerate(label):
+                c = col - len(label) // 2 + i
+                if 0 <= c < chart_w:
+                    x_chars[c] = (ch, "bright_white" if is_30min else "dim")
+
+        x_line = Text(overflow="fold")
+        for c in range(chart_w):
+            if c in x_chars:
+                ch, st = x_chars[c]
+                x_line.append(ch, style=st)
+            else:
+                x_line.append("─", style=DIM_GRID)
+        x_line.append(" " * (CHART_Y_W - 1), style="")
+        x_line.append("┘", style="dim")
+        out.append_text(x_line)
 
         self._w_spy.update(out)
 
