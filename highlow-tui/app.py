@@ -522,13 +522,17 @@ class HighLowTUI(App):
 
         span_secs = view_end - view_start
 
+        # Pre-compute column ranges so we can draw close→open connectors afterward
+        col_ranges = []
         for candle in candles:
             bt = candle["bucket_ts"]
-            # Proportional column range for this 1-min bucket
             c_left  = max(0, round((bt      - view_start) / span_secs * (chart_w - 1)))
             c_right = min(chart_w - 1, round((bt + 60 - view_start) / span_secs * (chart_w - 1)))
-            c_mid   = (c_left + c_right) // 2
-            gap = 1 if c_right - c_left > 1 else 0  # 1-char gap between candles
+            col_ranges.append((c_left, c_right))
+
+        for idx, candle in enumerate(candles):
+            c_left, c_right = col_ranges[idx]
+            c_mid = (c_left + c_right) // 2
 
             bullish     = candle["close"] >= candle["open"]
             body_color  = "bright_green" if bullish else "bright_red"
@@ -543,14 +547,30 @@ class HighLowTUI(App):
 
             for r in range(high_row, low_row + 1):
                 in_body = body_top <= r <= body_bot
-                # Body fills the candle width (leaving gap on right)
+                # Body fills full candle width, no gap — adjacent candles touch
                 if in_body:
-                    for c in range(c_left, c_right - gap + 1):
+                    for c in range(c_left, c_right + 1):
                         if 0 <= c < chart_w:
                             grid[r][c] = ("█", body_color)
-                # Wick: only in the center column, where body is absent
+                # Wick in center column where body is absent
                 if 0 <= c_mid < chart_w and not in_body:
                     grid[r][c_mid] = ("│", wick_color)
+
+        # Draw close→open connectors between adjacent candles so they look stitched together.
+        # The connector column is the right edge of candle[i]; it bridges the vertical
+        # distance between candle[i].close and candle[i+1].open.
+        for idx in range(len(candles) - 1):
+            _, c_conn = col_ranges[idx]          # right edge of this candle
+            close_r = to_row(candles[idx]["close"])
+            open_r  = to_row(candles[idx + 1]["open"])
+            if close_r == open_r:
+                continue                          # already flush, nothing to draw
+            lo, hi = min(close_r, open_r), max(close_r, open_r)
+            bullish_next = candles[idx + 1]["close"] >= candles[idx + 1]["open"]
+            conn_color = "green" if bullish_next else "red"
+            for r in range(lo, hi + 1):
+                if 0 <= c_conn < chart_w and grid[r][c_conn][0] not in ("█",):
+                    grid[r][c_conn] = ("│", conn_color)
 
         # Current-value line — drawn after candles, only overwrites empty cells
         # so candle bodies/wicks always take visual priority
