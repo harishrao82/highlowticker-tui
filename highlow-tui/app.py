@@ -482,10 +482,12 @@ class HighLowTUI(App):
     def _build_candle_grid(candles, view_start: float, view_end: float,
                            chart_w: int, chart_h: int,
                            y_min: float, y_max: float,
-                           zero_row: int = -1):
+                           zero_row: int = -1,
+                           current_row: int = -1):
         """
         Render OHLC candles into a grid[row][col] = (char, style_str).
         zero_row >= 0 draws a dashed zero line behind candles.
+        current_row >= 0 draws a subtle horizontal current-value line.
         """
         DIM_GRID = "#1e3a1e"
         grid = [[("·", DIM_GRID)] * chart_w for _ in range(chart_h)]
@@ -530,6 +532,13 @@ class HighLowTUI(App):
                 # Wick: only in the center column, where body is absent
                 if 0 <= c_mid < chart_w and not in_body:
                     grid[r][c_mid] = ("│", wick_color)
+
+        # Current-value line — drawn after candles, only overwrites empty cells
+        # so candle bodies/wicks always take visual priority
+        if 0 <= current_row < chart_h:
+            for c in range(chart_w):
+                if grid[current_row][c][0] == "·":
+                    grid[current_row][c] = ("─", "#3a6060")
 
         return grid
 
@@ -576,12 +585,12 @@ class HighLowTUI(App):
             frac = 1.0 - (v - y_min) / (y_max - y_min)
             return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
 
-        zero_row = to_row_m(0.0)
-        mid_row  = chart_h // 2
+        zero_row    = to_row_m(0.0)
+        current_row = to_row_m(current_score)
 
         grid = self._build_candle_grid(
             candles, view_start, view_end, chart_w, chart_h, y_min, y_max,
-            zero_row=zero_row,
+            zero_row=zero_row, current_row=current_row,
         )
 
         y_lbl = {
@@ -594,9 +603,15 @@ class HighLowTUI(App):
             line = Text(overflow="fold")
             for ch, st in row:
                 line.append(ch, style=st)
-            lbl = y_lbl.get(r_idx, "")
-            line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
-            line.append("│", style="dim")
+            if r_idx == current_row:
+                # Floating current-score label; overrides any static label at this row
+                lbl = f"{sign}{current_score:.0f}"
+                line.append(f"{lbl:>{CHART_Y_W - 1}}", style=f"bold {score_color}")
+                line.append("◄", style=f"bold {score_color}")
+            else:
+                lbl = y_lbl.get(r_idx, "")
+                line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
+                line.append("│", style="dim")
             out.append_text(line)
             out.append("\n")
 
@@ -676,8 +691,16 @@ class HighLowTUI(App):
         out.append("\n")
 
         mid_row = chart_h // 2
+
+        def to_row_spy(p: float) -> int:
+            frac = 1.0 - (p - y_min) / (y_max - y_min)
+            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+
+        current_row = to_row_spy(current_spy) if current_spy > 1.0 else -1
+
         grid = self._build_candle_grid(
             candles, view_start, view_end, chart_w, chart_h, y_min, y_max,
+            current_row=current_row,
         )
 
         y_lbl = {
@@ -690,9 +713,14 @@ class HighLowTUI(App):
             line = Text(overflow="fold")
             for ch, st in row:
                 line.append(ch, style=st)
-            lbl = y_lbl.get(r_idx, "")
-            line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
-            line.append("│", style="dim")
+            if r_idx == current_row:
+                lbl = f"{current_spy:.2f}"
+                line.append(f"{lbl:>{CHART_Y_W - 1}}", style="bold #4a9a9a")
+                line.append("◄", style="bold #4a9a9a")
+            else:
+                lbl = y_lbl.get(r_idx, "")
+                line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
+                line.append("│", style="dim")
             out.append_text(line)
             out.append("\n")
 
