@@ -197,13 +197,13 @@ class HighLowTUI(App):
         layout: horizontal;
     }
     .table-box {
-        width: 22;
+        width: 25%;
         height: 1fr;
         border: solid cyan;
         margin: 0 0;
     }
     #momentum-box {
-        width: 1fr;
+        width: 50%;
         height: 1fr;
         border: solid cyan;
         margin: 0 0;
@@ -754,7 +754,7 @@ class HighLowTUI(App):
             return
 
         width   = max(self._w_spy.size.width or 60, 30)
-        bar_max = max(width - 26, 8)
+        bar_max = max(width - 42, 8)
         PCT_SCALE = 2.0  # ±2% maps to full bar
 
         sector_stats = []
