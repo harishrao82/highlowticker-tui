@@ -197,7 +197,7 @@ class HighLowTUI(App):
         layout: horizontal;
     }
     .table-box {
-        width: 1fr;
+        width: 22;
         height: 1fr;
         border: solid cyan;
         margin: 0 0;
