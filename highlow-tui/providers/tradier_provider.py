@@ -44,11 +44,13 @@ class TradierProvider:
         symbols: List[str],
         rest_base: str = REST_BASE,
         stream_base: str = STREAM_BASE,
+        exclude_breadth: Optional[set] = None,
     ) -> None:
         self._token = access_token
         self.symbols = list(symbols)
         self._rest_base = rest_base
         self._stream_base = stream_base
+        self._exclude_breadth: set = exclude_breadth or set()
         self._headers = {
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
@@ -70,6 +72,8 @@ class TradierProvider:
         self._low_timestamps:  List[float] = []
         self._vol_tracker = VolumeTracker()
         self._volume_spikes: Dict[str, float] = {}
+        self._sse_live: set = set()  # symbols that have received at least one live SSE event
+        self._prev_close_prices: Dict[str, float] = {}  # previous session close for % vs close calc
 
     # ------------------------------------------------------------------
     # DataProvider protocol
@@ -83,7 +87,7 @@ class TradierProvider:
         self._stop_event.clear()
         await self._seed_from_rest()
         # Ensure index symbols are always seeded even if absent from the watchlist
-        missing = [s for s in ("SPY", "DIA", "QQQ") if s not in self._open_prices]
+        missing = [s for s in ("SPY", "DIA", "QQQ", "IWM", "VXX", "TLT", "GLD") if s not in self._open_prices]
         if missing:
             await self._fetch_quotes(missing)
         # Start one SSE reader per chunk, each with its own session ID
@@ -126,6 +130,30 @@ class TradierProvider:
 
     def get_metadata(self) -> dict:
         return {"name": "Tradier", "refresh_rate": 0.0, "is_realtime": True}
+
+    def get_breadth_state(self) -> dict:
+        """Snapshot current breadth state for persistence."""
+        cutoff = time.time() - PRUNE_WINDOW
+        return {
+            "high_counts":      dict(self._high_counts),
+            "low_counts":       dict(self._low_counts),
+            "high_timestamps":  [t for t in self._high_timestamps if t > cutoff],
+            "low_timestamps":   [t for t in self._low_timestamps  if t > cutoff],
+        }
+
+    def restore_breadth_state(self, state: dict) -> None:
+        """Inject persisted breadth state after connect() has seeded prices."""
+        cutoff = time.time() - PRUNE_WINDOW
+        self._high_counts.update(state.get("high_counts") or {})
+        self._low_counts.update(state.get("low_counts") or {})
+        for t in state.get("high_timestamps") or []:
+            if t > cutoff:
+                self._high_timestamps.append(t)
+        for t in state.get("low_timestamps") or []:
+            if t > cutoff:
+                self._low_timestamps.append(t)
+        self._high_timestamps.sort()
+        self._low_timestamps.sort()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -177,10 +205,12 @@ class TradierProvider:
             open_ = q.get("open") or last
             if last is None:
                 continue
-            self._open_prices[sym]    = float(open_)
-            self._session_highs[sym]  = float(high)
-            self._session_lows[sym]   = float(low)
-            self._current_prices[sym] = float(last)
+            prev_close = q.get("prevclose") or q.get("close") or last
+            self._open_prices[sym]       = float(open_)
+            self._session_highs[sym]     = float(high)
+            self._session_lows[sym]      = float(low)
+            self._current_prices[sym]    = float(last)
+            self._prev_close_prices[sym] = float(prev_close)
             self._high_counts.setdefault(sym, 0)
             self._low_counts.setdefault(sym, 0)
 
@@ -215,6 +245,7 @@ class TradierProvider:
                 self._low_timestamps.clear()
                 self._volume_spikes.clear()
                 self._vol_tracker = VolumeTracker()
+                self._sse_live.clear()
                 # Refetch quotes — Tradier will now have the real open price
                 await self._seed_from_rest()
 
@@ -285,17 +316,21 @@ class TradierProvider:
             return None
 
         self._current_prices[sym] = price
+        self._sse_live.add(sym)
         updated = False
+        in_breadth = sym not in self._exclude_breadth
 
         if price > self._session_highs.get(sym, price):
             self._session_highs[sym] = price
-            self._high_counts[sym] = self._high_counts.get(sym, 0) + 1
-            self._high_timestamps.append(ts)
+            if in_breadth:
+                self._high_counts[sym] = self._high_counts.get(sym, 0) + 1
+                self._high_timestamps.append(ts)
             updated = True
         if price < self._session_lows.get(sym, price):
             self._session_lows[sym] = price
-            self._low_counts[sym] = self._low_counts.get(sym, 0) + 1
-            self._low_timestamps.append(ts)
+            if in_breadth:
+                self._low_counts[sym] = self._low_counts.get(sym, 0) + 1
+                self._low_timestamps.append(ts)
             updated = True
 
         if not updated:
@@ -320,13 +355,27 @@ class TradierProvider:
                     for s in open_prices
                     if s in self._current_prices and open_prices[s]
                 },
+                "currentPrices": dict(self._current_prices),
                 "highCounts": wall_clock_counts(self._high_timestamps),
                 "lowCounts":  wall_clock_counts(self._low_timestamps),
                 "indexPrices": {
                     "SPY": self._current_prices.get("SPY", 0.0),
                     "DIA": self._current_prices.get("DIA", 0.0),
                     "QQQ": self._current_prices.get("QQQ", 0.0),
+                    "IWM": self._current_prices.get("IWM", 0.0),
+                    "VXX": self._current_prices.get("VXX", 0.0),
+                    "TLT": self._current_prices.get("TLT", 0.0),
+                    "GLD": self._current_prices.get("GLD", 0.0),
                 },
                 "volumeSpikes": dict(self._volume_spikes),
+                "liveSymbols": list(self._sse_live),
+                "indexPctFromClose": {
+                    sym: round(
+                        (self._current_prices[sym] - self._prev_close_prices[sym])
+                        / self._prev_close_prices[sym] * 100, 2
+                    )
+                    for sym in ("SPY", "QQQ", "IWM", "VXX", "TLT", "GLD", "DIA")
+                    if self._prev_close_prices.get(sym) and self._current_prices.get(sym)
+                },
             },
         }

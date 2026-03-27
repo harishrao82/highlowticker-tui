@@ -23,7 +23,7 @@ def _require_env(*names: str, broker: str, docs_url: str) -> Dict[str, str]:
     return result
 
 
-def load_equity_provider(broker: str, symbols: List[str]):
+def load_equity_provider(broker: str, symbols: List[str], exclude_breadth: set = None):
     """Return a DataProvider instance for the given equity broker."""
     if broker == "tradier":
         creds = _require_env(
@@ -31,7 +31,8 @@ def load_equity_provider(broker: str, symbols: List[str]):
             broker=broker, docs_url=DOCS_URL,
         )
         from providers.tradier_provider import TradierProvider
-        return TradierProvider(creds["TRADIER_ACCESS_TOKEN"], symbols)
+        return TradierProvider(creds["TRADIER_ACCESS_TOKEN"], symbols,
+                               exclude_breadth=exclude_breadth or set())
 
     raise ProviderLoadError(f"Unknown equity broker: {broker}")
 

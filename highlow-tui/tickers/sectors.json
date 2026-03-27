@@ -1,0 +1,127 @@
+{
+    "Technology": [
+        "AAPL", "MSFT", "NVDA", "AMD", "INTC", "QCOM", "AVGO", "TXN", "MRVL", "NXPI",
+        "SWKS", "MCHP", "KLAC", "LRCX", "AMAT", "ASML", "ARM", "ON", "SMCI", "MU",
+        "STX", "WDC", "NTAP", "HPQ", "HPE", "DELL", "IBM", "ACN", "CTSH", "EPAM",
+        "CDW", "GDDY", "IT", "CSCO", "JNPR", "ANET", "FFIV", "AKAM", "ZBRA",
+        "KEYS", "GRMN", "TRMB", "ANSS", "CDNS", "SNPS", "ADSK", "CRM", "NOW", "WDAY",
+        "INTU", "ORCL", "ADBE", "TEAM", "DDOG", "SNOW", "MDB", "PLTR", "APP",
+        "PANW", "CRWD", "FTNT", "ZS", "PAYC", "PAYX", "ADP", "BR",
+        "JKHY", "PTC", "VRSK", "MSCI", "FICO", "TYL",
+        "GLW", "TEL", "APH", "TER", "MPWR",
+        "TTD", "U", "DBX",
+        "MSTR", "CLSK", "MARA", "COIN",
+        "V", "MA", "PYPL", "FIS", "FI", "GPN", "CPAY", "AXP",
+        "TOST", "BKKT", "HIMS",
+        "VUZI", "FCEL", "QS", "SOL",
+        "VRSN", "MSI", "ADI", "SPGI",
+        "ASAN", "SONY", "PCT"
+    ],
+    "Financials": [
+        "JPM", "BAC", "WFC", "C", "GS", "MS", "USB", "PNC", "TFC", "BK",
+        "STT", "NTRS", "KEY", "RF", "HBAN", "FITB", "CFG", "MTB", "RJF", "SCHW",
+        "BX", "KKR", "APO", "BLK", "TROW", "BEN", "IVZ", "AMP",
+        "ICE", "CME", "CBOE", "NDAQ", "MCO",
+        "BRK.B", "PRU", "MET", "AFL", "ALL", "TRV", "CB", "HIG", "AIG",
+        "GL", "ACGL", "AIZ", "CINF", "PGR", "ERIE", "WRB",
+        "AON", "MMC", "AJG", "BRO", "WTW",
+        "SYF", "COF",
+        "HOOD", "SOFI", "AFRM", "LC", "UWMC", "RKT",
+        "PFG", "EG", "FDS", "ROP", "MKTX", "HSBC"
+    ],
+    "Healthcare": [
+        "JNJ", "UNH", "ABT", "LLY", "MRK", "PFE", "ABBV", "BMY", "AMGN", "GILD",
+        "VRTX", "REGN", "BIIB", "MRNA", "INCY", "IDXX", "HOLX", "DXCM", "PODD",
+        "ISRG", "MDT", "SYK", "BSX", "ZTS", "BAX", "BDX", "DHR", "TMO", "A",
+        "WAT", "MTD", "TECH", "CRL", "IQV", "RVTY", "EW", "RMD",
+        "HCA", "UHS", "DVA", "MOH", "ELV", "CNC", "HUM", "CVS", "CI",
+        "AZN", "NVO", "HSIC", "MCK", "CAH", "COR", "LH", "DGX",
+        "GEHC", "STE", "SOLV", "ALGN", "COO", "WST", "VTRS",
+        "TEM", "ARDX", "TDOC", "ZBH", "EFX"
+    ],
+    "Consumer Disc": [
+        "AMZN", "TSLA", "HD", "LOW", "TJX", "TGT", "BBY", "DG",
+        "DLTR", "ORLY", "AZO", "KMX", "ROST", "ULTA", "NKE", "LULU",
+        "RL", "TPR", "HAS", "MHK", "DECK", "POOL",
+        "MCD", "SBUX", "CMG", "YUM", "DRI", "DPZ",
+        "MAR", "HLT", "WYNN", "LVS", "MGM", "CZR", "DKNG",
+        "GM", "F", "APTV", "LI", "NVR", "PHM", "DHI", "LEN", "BLDR",
+        "RCL", "CCL", "NCLH", "ABNB", "EXPE", "BKNG",
+        "DJT", "EBAY", "WSM", "CAVA",
+        "GME", "AMC", "LYV", "TKO", "LKQ",
+        "GPC", "TSCO", "UBER", "CHGG"
+    ],
+    "Comm Services": [
+        "GOOGL", "GOOG", "META", "NFLX", "DIS", "CMCSA", "CHTR", "T", "TMUS",
+        "VZ", "WBD", "PARA", "FOXA", "FOX", "NWS", "NWSA",
+        "SNAP", "SPOT", "RBLX", "TTWO", "EA", "MTCH", "DASH",
+        "BABA", "MELI", "PDD", "OMC", "IPG",
+        "SONO", "RDDT", "ROKU"
+    ],
+    "Consumer Staples": [
+        "PG", "KO", "PEP", "PM", "MO", "MDLZ", "KHC", "GIS", "CAG", "SJM",
+        "CPB", "TSN", "HRL", "MKC", "K", "KDP", "MNST", "STZ", "BF.B",
+        "TAP", "CCEP", "LW", "ADM", "BG", "CTVA",
+        "WBA", "CLX", "CL", "KMB", "CHD", "KVUE",
+        "COST", "WMT", "KR", "SYY",
+        "EL", "HSY"
+    ],
+    "Industrials": [
+        "GE", "HON", "MMM", "CAT", "DE", "EMR", "ITW", "ETN", "PH", "ROK",
+        "AME", "DOV", "CARR", "OTIS", "JCI", "TT", "IR", "ALLE", "GNRC",
+        "GD", "LMT", "RTX", "NOC", "LHX", "HII", "TXT", "L", "LDOS",
+        "BA", "AXON",
+        "UPS", "FDX", "UNP", "CSX", "NSC", "WAB", "JBHT", "CHRW", "EXPD",
+        "ODFL", "LUV", "DAL", "UAL", "AAL",
+        "GWW", "FAST", "SNA", "SWK", "NDSN", "IEX", "PNR",
+        "RSG", "WM", "CTAS", "ROL",
+        "PWR", "URI",
+        "CMI", "PCAR", "HUBB", "XYL",
+        "FTV", "HWM", "GEV", "DAY",
+        "J", "VLTO", "AOS", "MAS",
+        "TDG", "TDY", "JBL", "SW",
+        "CPRT", "LII"
+    ],
+    "Energy": [
+        "XOM", "CVX", "COP", "EOG", "OXY", "PSX", "VLO", "MPC", "HES",
+        "DVN", "FANG", "EQT", "APA", "RRC", "CTRA", "SLB", "BKR", "HAL",
+        "KMI", "OKE", "WMB", "TRGP", "EXE",
+        "NRG", "VST", "CEG",
+        "TPL", "BTU", "JKS", "ENPH", "FSLR",
+        "WY", "RUN", "OKLO"
+    ],
+    "Materials": [
+        "LIN", "APD", "ECL", "SHW", "PPG", "IFF", "EMN", "DD", "DOW", "LYB",
+        "CF", "MOS", "NTR",
+        "NEM", "FCX", "AA", "NUE", "STLD", "X",
+        "ALB", "MLM", "VMC",
+        "IP", "PKG", "AVY", "AMCR", "BALL",
+        "VALE", "CCJ", "GFS"
+    ],
+    "Real Estate": [
+        "AMT", "PLD", "EQIX", "CCI", "SBAC", "DLR", "IRM",
+        "SPG", "O", "VICI", "PSA", "EXR", "WELL", "VTR", "DOC",
+        "EQR", "AVB", "UDR", "ESS", "MAA", "CPT", "INVH",
+        "ARE", "BXP", "CSGP", "CBRE",
+        "FRT", "REG", "KIM", "MPW",
+        "HST", "OPEN"
+    ],
+    "Utilities": [
+        "NEE", "DUK", "SO", "D", "EXC", "AEE", "AEP", "ES", "ETR", "EIX",
+        "XEL", "WEC", "LNT", "CMS", "NI", "PNW", "FE", "EVRG", "PCG",
+        "SRE", "PPL", "ED", "AES", "AWK", "PEG",
+        "GEN", "ATO", "CNP", "DTE"
+    ],
+    "ETF": [
+        "SPY", "QQQ", "IWM", "DIA",
+        "XLE", "XLF", "XLK", "XLV", "XLY", "XLP", "XLI", "XLB", "XLC", "XLU", "XLRE",
+        "IBB", "SMH", "IGV", "GDX", "KRE", "XME", "XRT",
+        "GLD", "SLV",
+        "TLT", "LQD", "IEF", "IEI", "BIL", "SHY", "TBT", "TMV",
+        "BITO",
+        "VXX", "UVXY",
+        "JETS", "TAN", "PHO", "BNO", "ICLN", "PBW", "FDN", "UUP", "UNG",
+        "MOO", "CORN", "WEAT", "FXY",
+        "GSL", "CMRE"
+    ]
+}

@@ -6,6 +6,7 @@ Run from highlow-tui directory: python app.py
 import asyncio
 import json
 import math
+import subprocess
 import sys
 import time
 from collections import deque
@@ -42,6 +43,13 @@ CHART_Y_W           = 8    # y-axis column width (chars including separator │)
 CHART_VIEW_SECS     = 1800 # 30-minute viewport window
 CHART_SCROLL_STEP   = 300  # seconds per scroll keypress (5 min)
 CHART_RENDER_INTERVAL = 0.5  # max chart render rate (seconds) — prevents lag at high event rates
+
+_SECTORS_PATH = _ROOT / "tickers" / "sectors.json"
+try:
+    with open(_SECTORS_PATH) as _f:
+        SECTORS: dict = json.load(_f)
+except Exception:
+    SECTORS = {}
 
 
 def make_bar(value: float, max_val: float, width: int = RATE_BAR_WIDTH, reverse: bool = False) -> str:
@@ -161,9 +169,23 @@ class HighLowTUI(App):
     #app-title {
         width: 1fr;
     }
-    #ticker {
-        height: 1;
-        padding: 0 0;
+    #feed-row {
+        height: 6;
+        layout: horizontal;
+    }
+    #live-feed {
+        width: 1fr;
+        height: 6;
+        border: dashed $primary-darken-3;
+        padding: 0 1;
+        overflow: hidden hidden;
+    }
+    #index-prices {
+        width: 42;
+        height: 6;
+        border: dashed $primary-darken-3;
+        padding: 0 1;
+        overflow: hidden hidden;
     }
     #rate-bars {
         height: auto;
@@ -197,7 +219,7 @@ class HighLowTUI(App):
         overflow: hidden hidden;
     }
     #system-health {
-        height: 4;
+        height: 6;
         border-top: dashed $primary-darken-3;
         padding: 0 1;
     }
@@ -261,19 +283,17 @@ class HighLowTUI(App):
         self._w_lows  = None
         self._w_momentum = None
         self._w_spy      = None
-        self._w_ticker = None
         self._w_mode_toggle = None
         self._momentum_history: deque = deque(maxlen=30000)  # full session, ~30k max
-        self._spy_history:      deque = deque(maxlen=5000)   # full session; 5s interval × 5000 = ~7h
-        self._last_valid_spy:   float = 0.0      # last non-zero SPY price seen
         self._chart_offset_secs: float = 0.0    # 0 = live, positive = scrolled back
         self._last_chart_render: float = 0.0    # timestamp of last chart render
         self._event_count: int = 0
         self._event_timestamps: deque = deque(maxlen=600)  # last 10 min of event times
         self._w_health = None
-        self._ticker_text    = Text("")
-        self._ticker_doubled = Text("")
-        self._ticker_offset  = 0
+        self._w_feed   = None
+        self._w_index  = None
+        self._feed_events: deque = deque(maxlen=200)
+        self._feed_last_sec: int = 0
         self._stream_task = None
         self._start_time = time.time()
 
@@ -285,7 +305,9 @@ class HighLowTUI(App):
                 mode_label = "[bold cyan][Equity][/]  Crypto" if self._active_mode == "equity" else "Equity  [bold cyan][Crypto][/]"
                 yield Static(mode_label, id="mode-toggle")
             yield Static("● connecting", id="connection-status")
-        yield Static("", id="ticker")
+        with Horizontal(id="feed-row"):
+            yield Static("", id="live-feed")
+            yield Static("", id="index-prices")
         yield Static(id="rate-bars")
         with Horizontal(id="tables-container"):
             with Vertical(classes="table-box"):
@@ -302,13 +324,14 @@ class HighLowTUI(App):
 
     def on_mount(self) -> None:
         self._w_status    = self.query_one("#connection-status", Static)
-        self._w_ticker    = self.query_one("#ticker", Static)
         self._w_rate_bars = self.query_one("#rate-bars", Static)
         self._w_highs     = self.query_one("#highs-table", DataTable)
         self._w_lows      = self.query_one("#lows-table", DataTable)
         self._w_momentum  = self.query_one("#momentum-chart", Static)
         self._w_spy       = self.query_one("#spy-chart", Static)
         self._w_health    = self.query_one("#system-health", Static)
+        self._w_feed      = self.query_one("#live-feed", Static)
+        self._w_index     = self.query_one("#index-prices", Static)
         if self._equity_provider and self._crypto_provider:
             self._w_mode_toggle = self.query_one("#mode-toggle", Static)
         for table in (self._w_highs, self._w_lows):
@@ -316,24 +339,70 @@ class HighLowTUI(App):
             table.add_column("Count",  width=5)
             table.add_column("Price",  width=9)
             table.add_column("% Chg", width=8)
-        self.set_interval(1 / 12, self._scroll_ticker)
+        # Restore app-level state (table rows, prev counts) from last session
+        from core.session_store import load as _load_state
+        self._saved_state = _load_state()
+        if self._saved_state:
+            app_s = self._saved_state.get("app") or {}
+            self.session_highs = app_s.get("session_highs") or []
+            self.session_lows  = app_s.get("session_lows")  or []
+            self.prev_highs    = app_s.get("prev_highs")    or {}
+            self.prev_lows     = app_s.get("prev_lows")     or {}
+            self._highs_dirty  = True
+            self._lows_dirty   = True
         self._stream_task = asyncio.create_task(self._data_loop())
+        self.set_interval(1.0,  self._tick_heartbeat)
+        self.set_interval(60.0, self._autosave)
+        # Prevent macOS from sleeping while the app is running
+        try:
+            self._caffeinate = subprocess.Popen(
+                ["caffeinate", "-i"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            self._caffeinate = None
+
+    def on_unmount(self) -> None:
+        if getattr(self, "_caffeinate", None):
+            self._caffeinate.terminate()
+        self._autosave()
+
+    def _build_save_state(self) -> dict:
+        state: dict = {"app": {}, "provider": {}}
+        state["app"] = {
+            "session_highs": self.session_highs,
+            "session_lows":  self.session_lows,
+            "prev_highs":    self.prev_highs,
+            "prev_lows":     self.prev_lows,
+        }
+        if hasattr(self._provider, "get_breadth_state"):
+            state["provider"] = self._provider.get_breadth_state()
+        return state
+
+    def _autosave(self) -> None:
+        from core.session_store import save as _save_state
+        try:
+            _save_state(self._build_save_state())
+        except Exception:
+            pass
 
     def action_chart_scroll_back(self) -> None:
         oldest = self._momentum_history[0][0] if self._momentum_history else time.time()
         max_offset = time.time() - oldest - CHART_VIEW_SECS
         self._chart_offset_secs = min(self._chart_offset_secs + CHART_SCROLL_STEP, max(max_offset, 0))
         self._render_momentum_chart()
-        self._render_spy_chart()
 
     def action_chart_scroll_fwd(self) -> None:
         self._chart_offset_secs = max(0.0, self._chart_offset_secs - CHART_SCROLL_STEP)
         self._render_momentum_chart()
-        self._render_spy_chart()
 
     async def _data_loop(self) -> None:
         try:
             await self._provider.connect()
+            # Restore provider breadth state after REST seed so counts survive restart
+            saved = getattr(self, "_saved_state", None)
+            if saved and hasattr(self._provider, "restore_breadth_state"):
+                self._provider.restore_breadth_state(saved.get("provider") or {})
             self.connection_status = "connected"
             self._refresh_status()
             async for data in self._provider.stream():
@@ -425,6 +494,19 @@ class HighLowTUI(App):
         self._event_count += 1
         self._event_timestamps.append(ts)
 
+        # Live feed: sample one random symbol per second when data arrives
+        now_sec = int(ts)
+        if now_sec != self._feed_last_sec:
+            self._feed_last_sec = now_sec
+            candidates = [s for s in percent_change if last_high.get(s) or last_low.get(s)]
+            if candidates:
+                import random
+                sym   = random.choice(candidates)
+                price = last_high.get(sym) or last_low.get(sym) or 0.0
+                pct   = percent_change.get(sym, 0.0)
+                self._feed_events.appendleft({"ts": ts, "sym": sym, "price": price, "pct": pct})
+
+
     @staticmethod
     def _compute_momentum_score(high_counts: dict, low_counts: dict) -> float:
         """Weighted momentum: recent timeframes count more.
@@ -435,27 +517,16 @@ class HighLowTUI(App):
         h20 = high_counts.get("20m", 0);  l20 = low_counts.get("20m", 0)
         return 4 * (h1 - l1) + 2 * (h5 - l5) + (h20 - l20)
 
-    SPY_SAMPLE_INTERVAL = 5  # seconds between SPY price samples (5s → ~12 points/min for accurate OHLC)
-
     def _update_momentum(self, high_counts: dict, low_counts: dict) -> None:
         score = self._compute_momentum_score(high_counts, low_counts)
-        raw_spy = (self.last_state.get("indexPrices") or {}).get("SPY", 0.0)
-        if raw_spy and raw_spy > 1.0:
-            self._last_valid_spy = raw_spy
-        spy = self._last_valid_spy
         now   = time.time()
         self._momentum_history.append((now, score))
-        if spy and (not self._spy_history or now - self._spy_history[-1][0] >= self.SPY_SAMPLE_INTERVAL):
-            self._spy_history.append((now, spy))
         # Throttle chart renders: at high event rates (20-50/sec) rendering every event
         # would copy/iterate large deques continuously and lag the asyncio loop.
         if now - self._last_chart_render >= CHART_RENDER_INTERVAL:
             self._last_chart_render = now
-            # Compute viewport once so both charts are locked to the same time window
-            view_end   = now - self._chart_offset_secs
-            view_start = view_end - CHART_VIEW_SECS
-            self._render_momentum_chart(view_start, view_end)
-            self._render_spy_chart(view_start, view_end)
+            self._render_breadth_histogram()
+            self._render_sector_breadth()
 
     @staticmethod
     def _x_axis_marks(view_start: float, view_end: float, chart_w: int):
@@ -498,15 +569,6 @@ class HighLowTUI(App):
             elif last is not None:
                 vals[i] = last
         return vals
-
-    @staticmethod
-    def _apply_sma(vals: list, period: int = 9) -> list:
-        """Simple moving average over a list that may contain None entries."""
-        result = []
-        for i in range(len(vals)):
-            window = [v for v in vals[max(0, i - period + 1): i + 1] if v is not None]
-            result.append(sum(window) / len(window) if window else None)
-        return result
 
     @staticmethod
     def _ohlc_1min(history, view_start: float, view_end: float):
@@ -592,280 +654,171 @@ class HighLowTUI(App):
 
         return grid
 
-    def _render_momentum_chart(self, view_start: float = None, view_end: float = None) -> None:
+    def _render_breadth_histogram(self) -> None:
         if not self._w_momentum:
             return
 
-        if view_end is None:
-            now      = time.time()
-            view_end = now - self._chart_offset_secs
-            view_start = view_end - CHART_VIEW_SECS
-        width      = max(self._w_momentum.size.width  or 60, CHART_Y_W + 4)
-        height     = max(self._w_momentum.size.height or 20, 5)
-        chart_w    = width - CHART_Y_W
-        chart_h    = max(height - 2, 3)
-
-        current_score = self._momentum_history[-1][1] if self._momentum_history else 0.0
-        sign        = "+" if current_score > 0 else ""
-        score_color = ("bright_green" if current_score > 0
-                       else ("bright_red" if current_score < 0 else "white"))
-        scroll_tag  = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
-                       if self._chart_offset_secs else "  LIVE")
+        current_prices = self.last_state.get("currentPrices") or {}
+        last_high      = self.last_state.get("lastHigh") or {}
+        last_low       = self.last_state.get("lastLow") or {}
+        live_syms      = set(self.last_state.get("liveSymbols") or [])
+        etf_syms       = set(SECTORS.get("ETF", []))
 
         out = Text()
-        out.append("MOMENTUM  ", style="bold dim white")
-        out.append(f"Score: {sign}{current_score:.0f}", style=f"bold {score_color}")
-        out.append("  SMA9", style="dim")
-        out.append(scroll_tag, style="dim yellow")
+        if not current_prices:
+            out.append("BREADTH  ", style="bold dim white")
+            out.append("Waiting for data...", style="dim")
+            self._w_momentum.update(out)
+            return
+
+        # Only include symbols with live SSE updates and exclude ETFs
+        positions = []
+        for sym, cur in current_prices.items():
+            if sym not in live_syms or sym in etf_syms:
+                continue
+            hi = last_high.get(sym, cur)
+            lo = last_low.get(sym, cur)
+            if hi > lo:
+                positions.append(max(0.0, min(1.0, (cur - lo) / (hi - lo))))
+            else:
+                positions.append(0.5)
+
+        total     = len(positions)
+        width     = max(self._w_momentum.size.width  or 60, 20)
+        height    = max(self._w_momentum.size.height or 20, 5)
+        n_buckets = max(height - 2, 5)
+        bar_max_w = width - 14
+
+        buckets = [0] * n_buckets
+        for pos in positions:
+            buckets[min(n_buckets - 1, int(pos * n_buckets))] += 1
+
+        max_count = max(buckets) or 1
+        near_high = sum(buckets[int(n_buckets * 0.7):])
+        near_low  = sum(buckets[:int(n_buckets * 0.3)])
+        if near_high > near_low * 1.5:
+            signal, sig_col = "BULLISH", "bright_green"
+        elif near_low > near_high * 1.5:
+            signal, sig_col = "BEARISH", "bright_red"
+        else:
+            signal, sig_col = "NEUTRAL", "yellow"
+
+        out.append("BREADTH  ", style="bold dim white")
+        out.append(signal, style=f"bold {sig_col}")
+        out.append(f"  {total} symbols", style="dim")
         out.append("\n")
 
-        history_view = [(t, s) for t, s in self._momentum_history if t >= view_start]
+        # Top row = near session high (1.0), bottom = near session low (0.0)
+        for i in range(n_buckets - 1, -1, -1):
+            count   = buckets[i]
+            bar_len = round(count / max_count * bar_max_w)
+            frac    = (i + 0.5) / n_buckets
+            if frac >= 0.75:   color = "bright_green"
+            elif frac >= 0.55: color = "green"
+            elif frac >= 0.45: color = "yellow"
+            elif frac >= 0.25: color = "red"
+            else:              color = "bright_red"
 
-        if not history_view:
-            out.append("  No data in this window\n", style="dim")
-            self._w_momentum.update(out)
-            return
+            if i == n_buckets - 1: label = " HIGH "
+            elif i == n_buckets // 2: label = "  MID "
+            elif i == 0:            label = "  LOW "
+            else:                   label = "      "
 
-        raw_vals = self._series_to_cols(history_view, view_start, view_end, chart_w)
-        sma_vals = self._apply_sma(raw_vals, 9)
-
-        all_vals = [v for v in sma_vals if v is not None]
-        if not all_vals:
-            out.append("  No data in this window\n", style="dim")
-            self._w_momentum.update(out)
-            return
-
-        span   = max(abs(v) for v in all_vals) or 1.0
-        y_max  = span * 1.1
-        y_min  = -y_max
-
-        def to_row_m(v: float) -> int:
-            frac = 1.0 - (v - y_min) / (y_max - y_min)
-            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
-
-        zero_row    = to_row_m(0.0)
-        current_sma = next((v for v in reversed(sma_vals) if v is not None), current_score)
-        current_row = to_row_m(current_sma)
-
-        DIM_GRID = "#1e3a1e"
-        grid = [[("·", DIM_GRID)] * chart_w for _ in range(chart_h)]
-
-        # Zero line
-        for c in range(chart_w):
-            grid[zero_row][c] = ("─", "dim white")
-
-        # Raw data line — dim, dots only, no connectors
-        for c, v in enumerate(raw_vals):
-            if v is not None:
-                r = to_row_m(v)
-                if grid[r][c][0] == "·":
-                    grid[r][c] = ("·", "#2a5a2a" if v >= 0 else "#5a2a2a")
-
-        # SMA line — bright, with vertical connectors
-        prev_r = None
-        for c, v in enumerate(sma_vals):
-            if v is None:
-                prev_r = None
-                continue
-            r = to_row_m(v)
-            sma_color = "bright_green" if v >= 0 else "bright_red"
-            if prev_r is not None:
-                lo, hi = min(prev_r, r), max(prev_r, r)
-                for fill_r in range(lo, hi + 1):
-                    ch = "●" if fill_r == r else "│"
-                    fc = "bright_green" if fill_r <= zero_row else "bright_red"
-                    if 0 <= c < chart_w:
-                        grid[fill_r][c] = (ch, fc)
-            else:
-                if 0 <= c < chart_w:
-                    grid[r][c] = ("●", sma_color)
-            prev_r = r
-
-        # Current-value line — teal dashes only in empty cells
-        if 0 <= current_row < chart_h:
-            for c in range(chart_w):
-                if grid[current_row][c][0] == "·":
-                    grid[current_row][c] = ("─", "#3a6060")
-
-        y_lbl = {
-            0:            f"{y_max:+.0f}",
-            zero_row:     "   0",
-            chart_h - 1:  f"{y_min:+.0f}",
-        }
-
-        for r_idx, row in enumerate(grid):
-            line = Text(overflow="fold")
-            for ch, st in row:
-                line.append(ch, style=st)
-            if r_idx == current_row:
-                lbl = f"{sign}{current_sma:.0f}"
-                line.append(f"{lbl:>{CHART_Y_W - 1}}", style=f"bold {score_color}")
-                line.append("◄", style=f"bold {score_color}")
-            else:
-                lbl = y_lbl.get(r_idx, "")
-                line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
-                line.append("│", style="dim")
-            out.append_text(line)
-            out.append("\n")
-
-        marks   = self._x_axis_marks(view_start, view_end, chart_w)
-        x_chars: dict = {}
-        for col, label, is_30min in marks:
-            for i, ch in enumerate(label):
-                c = col - len(label) // 2 + i
-                if 0 <= c < chart_w:
-                    x_chars[c] = (ch, "bright_white" if is_30min else "dim")
-
-        x_line = Text(overflow="fold")
-        for c in range(chart_w):
-            if c in x_chars:
-                ch, st = x_chars[c]
-                x_line.append(ch, style=st)
-            else:
-                x_line.append("─", style=DIM_GRID)
-        x_line.append(" " * (CHART_Y_W - 1), style="")
-        x_line.append("┘", style="dim")
-        out.append_text(x_line)
+            out.append(label, style="dim white")
+            out.append("█" * bar_len, style=color)
+            out.append(f" {count}\n", style="dim")
 
         self._w_momentum.update(out)
 
-    def _render_spy_chart(self, view_start: float = None, view_end: float = None) -> None:
+    def _render_sector_breadth(self) -> None:
+        """Show per-sector intraday momentum as average price position (0=low, 1=high)."""
         if not self._w_spy:
             return
 
-        if view_end is None:
-            now      = time.time()
-            view_end = now - self._chart_offset_secs
-            view_start = view_end - CHART_VIEW_SECS
-        width      = max(self._w_spy.size.width  or 60, CHART_Y_W + 4)
-        height     = max(self._w_spy.size.height or 10, 5)
-        chart_w    = width - CHART_Y_W
-        chart_h    = max(height - 2, 3)
+        out = Text()
+        out.append("SECTORS", style="bold dim white")
+        out.append("  intraday momentum\n", style="dim")
 
-        current_spy = self._last_valid_spy
-        scroll_tag  = (f"  ◀ -{int(self._chart_offset_secs / 60)}m"
-                       if self._chart_offset_secs else "  LIVE")
-
-        spy_history = [(t, p) for t, p in self._spy_history if p > 1.0 and t >= view_start]
-
-        if not spy_history:
-            out = Text()
-            out.append("SPY  ", style="bold dim white")
-            out.append(f"{current_spy:.2f}", style="bold bright_cyan")
-            out.append(scroll_tag, style="dim yellow")
-            out.append("\n")
-            out.append("  No data in this window\n", style="dim")
+        if not SECTORS:
+            out.append("  sectors.json not found\n", style="dim red")
             self._w_spy.update(out)
             return
 
-        raw_vals = self._series_to_cols(spy_history, view_start, view_end, chart_w)
-        sma_vals = self._apply_sma(raw_vals, 9)
+        pct_map   = self.last_state.get("percentChange") or {}
+        new_highs = self.last_state.get("newHighs") or {}
+        new_lows  = self.last_state.get("newLows")  or {}
 
-        valid = [v for v in sma_vals if v is not None]
-        if not valid:
+        if not pct_map:
+            out.append("  Waiting for data...\n", style="dim")
+            self._w_spy.update(out)
             return
 
-        p_min, p_max = min(valid), max(valid)
-        min_span = max(current_spy, p_max) * 0.003
-        span     = max(p_max - p_min, min_span)
-        center   = (p_max + p_min) / 2
-        y_min    = center - span * 0.6
-        y_max    = center + span * 0.6
+        width   = max(self._w_spy.size.width or 60, 30)
+        bar_max = max(width - 26, 8)
+        PCT_SCALE = 2.0  # ±2% maps to full bar
 
-        def to_row_spy(p: float) -> int:
-            frac = 1.0 - (p - y_min) / (y_max - y_min)
-            return max(0, min(chart_h - 1, int(frac * (chart_h - 1))))
+        sector_stats = []
+        for sector, syms in SECTORS.items():
+            pcts = [pct_map[s] for s in syms if s in pct_map]
+            avg_pct = sum(pcts) / len(pcts) if pcts else 0.0
+            h = sum(1 for s in syms if s in new_highs)
+            l = sum(1 for s in syms if s in new_lows)
+            sector_stats.append((sector, avg_pct, h, l, len(pcts)))
 
-        current_sma = next((v for v in reversed(sma_vals) if v is not None), current_spy)
-        current_row = to_row_spy(current_spy) if current_spy > 1.0 else -1
-        baseline    = next((v for v in sma_vals if v is not None), current_sma)
-        delta       = current_sma - baseline
-        sign        = "+" if delta >= 0 else ""
-        line_color  = "bright_green" if delta >= 0 else "bright_red"
-        delta_color = line_color
+        _SECTOR_ORDER = [
+            "Technology", "Financials", "Healthcare", "Consumer Disc",
+            "Comm Services", "Industrials", "Consumer Staples",
+            "Energy", "Materials", "Real Estate", "Utilities", "ETF",
+        ]
+        stat_map = {s[0]: s[1:] for s in sector_stats}
+        ordered = [(s, *stat_map[s]) for s in _SECTOR_ORDER if s in stat_map]
+        seen = set(_SECTOR_ORDER)
+        ordered += [(s, *stat_map[s]) for s in stat_map if s not in seen]
 
-        out = Text()
-        out.append("SPY  ", style="bold dim white")
-        out.append(f"{current_spy:.2f}  ", style="bold bright_cyan")
-        out.append(f"{sign}{delta:.2f}", style=f"bold {delta_color}")
-        out.append("  SMA9", style="dim")
-        out.append(scroll_tag, style="dim yellow")
-        out.append("\n")
+        for sector, avg_pct, h, l, n in ordered:
+            filled = min(bar_max, round(abs(avg_pct) / PCT_SCALE * bar_max))
+            empty  = bar_max - filled
 
-        DIM_GRID = "#1e3a1e"
-        mid_row  = chart_h // 2
-        grid     = [[("·", DIM_GRID)] * chart_w for _ in range(chart_h)]
-
-        # Raw data line — dim dots, no connectors
-        for c, v in enumerate(raw_vals):
-            if v is not None:
-                r = to_row_spy(v)
-                if grid[r][c][0] == "·":
-                    grid[r][c] = ("·", "#2a4a4a")
-
-        # SMA line — bright, with vertical connectors
-        prev_r = None
-        for c, v in enumerate(sma_vals):
-            if v is None:
-                prev_r = None
-                continue
-            r = to_row_spy(v)
-            if prev_r is not None:
-                lo, hi = min(prev_r, r), max(prev_r, r)
-                for fill_r in range(lo, hi + 1):
-                    ch = "●" if fill_r == r else "│"
-                    if 0 <= c < chart_w:
-                        grid[fill_r][c] = (ch, line_color)
+            if n == 0:
+                bar_color = "dim"
+            elif avg_pct >= 0.5:
+                bar_color = "bright_green"
+            elif avg_pct >= 0.1:
+                bar_color = "green"
+            elif avg_pct <= -0.5:
+                bar_color = "bright_red"
+            elif avg_pct <= -0.1:
+                bar_color = "red"
             else:
-                if 0 <= c < chart_w:
-                    grid[r][c] = ("●", line_color)
-            prev_r = r
+                bar_color = "yellow"
 
-        # Current-value line
-        if 0 <= current_row < chart_h:
-            for c in range(chart_w):
-                if grid[current_row][c][0] == "·":
-                    grid[current_row][c] = ("─", "#3a6060")
-
-        y_lbl = {
-            0:       f"{y_max:.2f}",
-            mid_row: f"{(y_max + y_min) / 2:.2f}",
-            chart_h - 1: f"{y_min:.2f}",
-        }
-
-        for r_idx, row in enumerate(grid):
-            line = Text(overflow="fold")
-            for ch, st in row:
-                line.append(ch, style=st)
-            if r_idx == current_row:
-                lbl = f"{current_spy:.2f}"
-                line.append(f"{lbl:>{CHART_Y_W - 1}}", style="bold #4a9a9a")
-                line.append("◄", style="bold #4a9a9a")
+            # Signal: combine % direction with breadth (▲/▼ ratio)
+            more_highs = h > l * 1.5
+            more_lows  = l > h * 1.5
+            pct_up     = avg_pct >  0.05
+            pct_dn     = avg_pct < -0.05
+            if pct_up and more_highs:
+                signal, sig_style = "BULLISH",  "bold bright_green"
+            elif pct_up and more_lows:
+                signal, sig_style = "BOUNCING", "bold yellow"
+            elif pct_dn and more_lows:
+                signal, sig_style = "BEARISH",  "bold bright_red"
+            elif pct_dn and more_highs:
+                signal, sig_style = "FADING",   "bold orange1"
+            elif not more_highs and not more_lows:
+                signal, sig_style = "MIXED",    "dim yellow"
             else:
-                lbl = y_lbl.get(r_idx, "")
-                line.append(f"{lbl:>{CHART_Y_W - 1}}", style="dim white")
-                line.append("│", style="dim")
-            out.append_text(line)
-            out.append("\n")
+                signal, sig_style = "NEUTRAL",  "dim"
 
-        marks   = self._x_axis_marks(view_start, view_end, chart_w)
-        x_chars: dict = {}
-        for col, label, is_30min in marks:
-            for i, ch in enumerate(label):
-                c = col - len(label) // 2 + i
-                if 0 <= c < chart_w:
-                    x_chars[c] = (ch, "bright_white" if is_30min else "dim")
-
-        x_line = Text(overflow="fold")
-        for c in range(chart_w):
-            if c in x_chars:
-                ch, st = x_chars[c]
-                x_line.append(ch, style=st)
-            else:
-                x_line.append("─", style=DIM_GRID)
-        x_line.append(" " * (CHART_Y_W - 1), style="")
-        x_line.append("┘", style="dim")
-        out.append_text(x_line)
+            label = f"{sector[:12]:<12}"
+            out.append(label, style="white")
+            out.append(" ")
+            out.append("█" * filled, style=bar_color)
+            out.append("░" * empty,  style="dim")
+            out.append(f" ▲{h:<3}", style="bold green")
+            out.append(f"▼{l:<3}", style="bold red")
+            out.append(f"{avg_pct:+.2f}% ", style=f"bold {bar_color}" if n else "dim")
+            out.append(f"{signal}\n", style=sig_style if n else "dim")
 
         self._w_spy.update(out)
 
@@ -874,32 +827,90 @@ class HighLowTUI(App):
         name = self._provider.get_metadata()["name"]
         self._w_status.update(f"{dot} [dim]{name}[/dim]  {self.connection_status}")
 
-    def _scroll_ticker(self) -> None:
-        n = len(self._ticker_text)
-        if not n:
-            return
-        w = self._w_ticker.size.width or 80
-        self._w_ticker.update(self._ticker_doubled[self._ticker_offset : self._ticker_offset + w])
-        self._ticker_offset = (self._ticker_offset + 1) % n
 
-    def _build_ticker_text(self) -> None:
-        # Merge highs and lows, sort by timestamp newest-first (matches tables)
-        tagged = (
-            [(e, "high") for e in self.session_highs[:25]] +
-            [(e, "low")  for e in self.session_lows[:25]]
-        )
-        tagged.sort(key=lambda x: x[0].get("timestamp", 0), reverse=True)
-        t = Text()
-        for e, kind in tagged[:50]:
-            pct   = e.get("percentChange") or 0
-            arrow = "▲" if kind == "high" else "▼"
-            style = "green" if kind == "high" else "red"
-            t.append(f"  {e['symbol']} {arrow}{e['price']:.2f} ({pct:+.2f}%)  ", style=style)
-        if not len(t):
-            t.append("  Waiting for data...  ", style="dim")
-        self._ticker_text = t
-        self._ticker_doubled = t + t
-        self._ticker_offset = min(self._ticker_offset, max(1, len(t)) - 1)
+    def _tick_heartbeat(self) -> None:
+        """Fires every second. Adds a feed entry so the user can see the UI is alive
+        and how long ago the last real HIGHLOW_UPDATE event arrived."""
+        now = time.time()
+        lag = now - self.last_update_time if self.last_update_time else None
+        self._feed_events.appendleft({"ts": now, "sym": None, "lag": lag})
+        self._refresh_live_feed()
+        self._refresh_index_prices()
+        self._render_sector_breadth()
+
+    _INDEX_SYMS = ["SPY", "QQQ", "IWM", "VXX", "TLT", "GLD"]
+
+    def _refresh_index_prices(self) -> None:
+        if not self._w_index:
+            return
+        current = self.last_state.get("currentPrices") or {}
+        pct_map = self.last_state.get("indexPctFromClose") or {}
+
+        def _cell(sym: str) -> tuple[str, str, str, str, str]:
+            """Return (sym_style, sym_str, price_str, arrow, pct_str, color) for one index."""
+            price = current.get(sym, 0.0)
+            pct   = pct_map.get(sym)
+            if not price:
+                return ("dim", f"{sym:<3}", "     —", "", "", "dim")
+            arrow = "▲" if (pct or 0) >= 0 else "▼"
+            color = ("bright_red" if (pct or 0) >= 0 else "bright_green") if sym == "VXX" \
+                    else ("bright_green" if (pct or 0) >= 0 else "bright_red")
+            pct_str = f"{arrow}{abs(pct):.2f}%" if pct is not None else ""
+            return ("dim white", f"{sym:<3}", f"{price:>7.2f}", arrow, pct_str, color)
+
+        out = Text()
+        pairs = [(self._INDEX_SYMS[i], self._INDEX_SYMS[i + 3]) for i in range(3)]
+        for left, right in pairs:
+            _, ls, lp, _, lpct, lc = _cell(left)
+            _, rs, rp, _, rpct, rc = _cell(right)
+            out.append(f"{ls} ", style="dim white")
+            out.append(f"{lp} ", style="bold white")
+            out.append(f"{lpct:<8}", style=f"bold {lc}")
+            out.append(f"{rs} ", style="dim white")
+            out.append(f"{rp} ", style="bold white")
+            out.append(f"{rpct}\n", style=f"bold {rc}")
+
+        self._w_index.update(out)
+
+    def _refresh_live_feed(self) -> None:
+        if not self._w_feed:
+            return
+        h = self._w_feed.size.height or 5
+        out = Text(overflow="fold")
+        shown = 0
+        for ev in self._feed_events:
+            if shown >= h:
+                break
+            t = datetime.fromtimestamp(ev["ts"], tz=_ET).strftime("%H:%M:%S")
+            if ev["sym"] is None:
+                lag = ev.get("lag")
+                if lag is None:
+                    lag_str, dot_style = "waiting for data", "dim"
+                elif lag < 5:
+                    lag_str, dot_style = f"last event {lag:.0f}s ago", "green"
+                elif lag < 30:
+                    lag_str, dot_style = f"last event {lag:.0f}s ago", "yellow"
+                else:
+                    lag_str, dot_style = f"no data in {lag:.0f}s ⚠", "bright_red"
+                out.append(f"{t} ", style="dim")
+                out.append("● ", style=dot_style)
+                out.append(f"{lag_str}\n", style="dim")
+            else:
+                pct     = ev["pct"]
+                arrow   = "▲" if pct >= 0 else "▼"
+                pct_col = "bright_green" if pct >= 0 else "bright_red"
+                out.append(f"{t} ", style="dim")
+                out.append(f"{ev['sym']:<6} ", style="bold white")
+                out.append(arrow, style=pct_col)
+                out.append(f"{ev['price']:>8.2f}  ", style="white")
+                out.append(f"{pct:+.2f}%", style=f"bold {pct_col}")
+                out.append("\n")
+            shown += 1
+
+        if shown == 0:
+            out.append("  Waiting for stream...", style="dim")
+
+        self._w_feed.update(out)
 
     @staticmethod
     def _render_rate_bars(high_counts: dict, low_counts: dict, width: int) -> str:
@@ -938,56 +949,80 @@ class HighLowTUI(App):
                 key=f"{prefix}_{i}_{e['symbol']}",
             )
 
-    def _refresh_health(self) -> None:
+    def _refresh_breadth(self) -> None:
         if not self._w_health:
             return
-        now = time.time()
 
-        # Time since last HIGHLOW_UPDATE — primary choking indicator
+        # Use the same rolling window counts that drive the rate bars —
+        # these come from wall_clock_counts() on raw SSE timestamps, not table entries.
+        high_counts = self.last_state.get("highCounts") or {}
+        low_counts  = self.last_state.get("lowCounts")  or {}
+        h1  = high_counts.get("1m",  0);  l1  = low_counts.get("1m",  0)
+        h5  = high_counts.get("5m",  0);  l5  = low_counts.get("5m",  0)
+        h20 = high_counts.get("20m", 0);  l20 = low_counts.get("20m", 0)
+
+        def _ratio(h, l):
+            total = h + l
+            return h / total if total else None
+
+        def _gauge(ratio, width=16):
+            if ratio is None:
+                return "░" * width, "dim"
+            filled = round(ratio * width)
+            bar = "█" * filled + "░" * (width - filled)
+            if ratio >= 0.65:   style = "bright_green"
+            elif ratio <= 0.35: style = "bright_red"
+            else:               style = "yellow"
+            return bar, style
+
+        r1  = _ratio(h1,  l1)
+        r5  = _ratio(h5,  l5)
+        r20 = _ratio(h20, l20)
+        bar1,  style1  = _gauge(r1)
+        bar5,  style5  = _gauge(r5)
+        bar20, style20 = _gauge(r20)
+
+        # Signal driven by 1m for responsiveness, confirmed by 5m
+        r_sig = r1 if r1 is not None else r5
+        if r_sig is None:
+            sig_text, sig_style = "NO DATA", "dim"
+        elif r_sig >= 0.65:
+            trend = "▲" if (r5 is None or r_sig > r5) else "►"
+            sig_text, sig_style = f"BULLISH {trend}", "bright_green"
+        elif r_sig <= 0.35:
+            trend = "▼" if (r5 is None or r_sig < r5) else "►"
+            sig_text, sig_style = f"BEARISH {trend}", "bright_red"
+        else:
+            sig_text, sig_style = "NEUTRAL", "yellow"
+
+        now = time.time()
         if self.last_update_time:
             lag = now - self.last_update_time
-            if lag < 3:
-                lag_str, lag_style = f"{lag:.1f}s ago", "bright_green"
-            elif lag < 15:
-                lag_str, lag_style = f"{lag:.1f}s ago", "yellow"
-            else:
-                lag_str, lag_style = f"{lag:.0f}s ago ⚠", "bright_red"
+            lag_str  = f"{lag:.0f}s ago"
+            lag_style = "bright_green" if lag < 3 else ("yellow" if lag < 15 else "bright_red")
         else:
-            lag_str, lag_style = "waiting...", "dim"
-
-        # Rolling 60-second event rate
-        cutoff60 = now - 60
-        rate60 = sum(1 for t in self._event_timestamps if t > cutoff60)
-
-        # Uptime
-        uptime_s = int(now - self._start_time)
-        h, rem = divmod(uptime_s, 3600)
-        m, s   = divmod(rem, 60)
-        uptime_str = f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
-
-        provider_name = self._provider.get_metadata()["name"] if self._provider else "—"
+            lag_str, lag_style = "waiting", "dim"
 
         out = Text()
-        # Row 1: last event + rate
-        out.append("LAST EVT ", style="dim")
-        out.append(lag_str, style=f"bold {lag_style}")
-        out.append("   RATE ", style="dim")
-        out.append(f"{rate60}/min", style="bold")
-        out.append("   TOTAL ", style="dim")
-        out.append(f"{self._event_count:,}", style="bold")
+        out.append("BREADTH  ", style="bold dim white")
+        out.append(sig_text, style=f"bold {sig_style}")
+        out.append("   LAST ", style="dim")
+        out.append(lag_str, style=lag_style)
         out.append("\n")
-        # Row 2: data sizes + uptime + provider
-        out.append("HIGHS ", style="dim")
-        out.append(f"{len(self.session_highs)}", style="bold bright_green")
-        out.append("  LOWS ", style="dim")
-        out.append(f"{len(self.session_lows)}", style="bold bright_red")
-        out.append("  MEM ", style="dim")
-        out.append(f"{len(self._momentum_history):,}", style="bold")
-        out.append("/", style="dim")
-        out.append(f"{len(self._spy_history)}", style="bold")
-        out.append("  UP ", style="dim")
-        out.append(uptime_str, style="bold")
-        out.append(f"  {provider_name}", style="dim cyan")
+        out.append(" 1m  ", style="dim")
+        out.append(bar1, style=style1)
+        out.append(f" {r1:.2f}" if r1 is not None else "  —  ", style=f"bold {style1}")
+        out.append(f"   H:{h1:<4} L:{l1}", style="dim")
+        out.append("\n")
+        out.append(" 5m  ", style="dim")
+        out.append(bar5, style=style5)
+        out.append(f" {r5:.2f}" if r5 is not None else "  —  ", style=f"bold {style5}")
+        out.append(f"   H:{h5:<4} L:{l5}", style="dim")
+        out.append("\n")
+        out.append("20m  ", style="dim")
+        out.append(bar20, style=style20)
+        out.append(f" {r20:.2f}" if r20 is not None else "  —  ", style=f"bold {style20}")
+        out.append(f"   H:{h20:<4} L:{l20}", style="dim")
 
         self._w_health.update(out)
 
@@ -999,12 +1034,11 @@ class HighLowTUI(App):
         bar_width = self._w_rate_bars.size.width or 80
         self._w_rate_bars.update(self._render_rate_bars(high_counts, low_counts, bar_width))
         self._update_momentum(high_counts, low_counts)
-        self._refresh_health()
+        self._refresh_breadth()
 
         thresholds = self.highlight_config.get("thresholds", {})
 
-        if self._highs_dirty or self._lows_dirty:
-            self._build_ticker_text()
+        self._refresh_live_feed()
 
         suppress = time.time() - self._start_time < 300
         if self._highs_dirty:
@@ -1115,7 +1149,6 @@ def main():
     from core.app_config import load_config, get_equity_broker, get_crypto_broker, ConfigError
     from core.provider_loader import load_equity_provider, load_crypto_provider, ProviderLoadError
     from core.license import get_license_key, validate, activate, save_license_key
-    from providers.yahoo_provider import YahooFinanceProvider
 
     # --activate <key>  — bind key to this machine and exit
     if "--activate" in sys.argv:
@@ -1156,7 +1189,10 @@ def main():
 
     if equity_broker:
         try:
-            equity_provider = load_equity_provider(equity_broker, equity_symbols)
+            equity_provider = load_equity_provider(
+                equity_broker, equity_symbols,
+                exclude_breadth=set(SECTORS.get("ETF", [])),
+            )
         except ProviderLoadError as e:
             print(str(e), file=sys.stderr)
             sys.exit(1)
@@ -1168,14 +1204,26 @@ def main():
             print(str(e), file=sys.stderr)
             sys.exit(1)
 
-    # Fallback: neither configured → Yahoo free tier
+    # No provider configured — refuse to start with a clear message
     if not equity_provider and not crypto_provider:
-        equity_provider = YahooFinanceProvider(equity_symbols)
+        print(
+            "\n[HighLow TUI] No broker configured.\n"
+            "  Add [equity] broker = \"tradier\" to ~/.highlowticker/config.toml\n"
+            "  and set TRADIER_ACCESS_TOKEN in your environment.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     app = HighLowTUI(
         equity_provider=equity_provider,
         crypto_provider=crypto_provider,
     )
+
+    import signal
+    def _on_sigterm(*_):
+        app.exit()  # triggers on_unmount → _autosave
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
     app.run()
 
 
