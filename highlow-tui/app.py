@@ -837,6 +837,7 @@ class HighLowTUI(App):
         self._refresh_live_feed()
         self._refresh_index_prices()
         self._render_sector_breadth()
+        self.refresh()
 
     _INDEX_SYMS = ["SPY", "QQQ", "IWM", "VXX", "TLT", "GLD"]
 
