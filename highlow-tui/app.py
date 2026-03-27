@@ -62,11 +62,11 @@ HIGHLIGHT_STYLES = {
     "flash_high": Style(),
     "flash_low": Style(),
     "week52_high": Style(color="white", bgcolor="rgb(20,83,45)"),
-    "week52_low": Style(color="white", bgcolor="rgb(127,29,29)"),
-    "yellow": Style(color="black", bgcolor="yellow"),
-    "orange": Style(color="black", bgcolor="orange1"),
-    "purple":       Style(color="white", bgcolor="purple"),
-    "volume_spike": Style(color="black", bgcolor="rgb(244,114,182)"),
+    "week52_low":  Style(color="white", bgcolor="rgb(127,29,29)"),
+    "yellow":      Style(color="black", bgcolor="rgb(234,179,8)"),
+    "orange":      Style(color="black", bgcolor="rgb(234,88,12)"),
+    "purple":      Style(color="white", bgcolor="rgb(109,40,217)"),
+    "volume_spike": Style(color="white", bgcolor="rgb(37,99,235)"),
     "default":      Style(),
 }
 
@@ -633,7 +633,7 @@ class HighLowTUI(App):
             body_right = c_right - 1 if candle_width > 1 else c_right
 
             bullish    = candle["close"] >= candle["open"]
-            bar_color  = "bright_green" if bullish else "bright_red"
+            bar_color  = "rgb(34,197,94)" if bullish else "rgb(220,38,38)"
 
             high_row = to_row(candle["high"])
             low_row  = to_row(candle["low"])
@@ -697,11 +697,11 @@ class HighLowTUI(App):
         near_high = sum(buckets[int(n_buckets * 0.7):])
         near_low  = sum(buckets[:int(n_buckets * 0.3)])
         if near_high > near_low * 1.5:
-            signal, sig_col = "BULLISH", "bright_green"
+            signal, sig_col = "BULLISH", "rgb(74,222,128)"
         elif near_low > near_high * 1.5:
-            signal, sig_col = "BEARISH", "bright_red"
+            signal, sig_col = "BEARISH", "rgb(220,38,38)"
         else:
-            signal, sig_col = "NEUTRAL", "yellow"
+            signal, sig_col = "NEUTRAL", "rgb(234,179,8)"
 
         out.append("BREADTH  ", style="bold dim white")
         out.append(signal, style=f"bold {sig_col}")
@@ -713,11 +713,11 @@ class HighLowTUI(App):
             count   = buckets[i]
             bar_len = round(count / max_count * bar_max_w)
             frac    = (i + 0.5) / n_buckets
-            if frac >= 0.75:   color = "bright_green"
-            elif frac >= 0.55: color = "green"
-            elif frac >= 0.45: color = "yellow"
-            elif frac >= 0.25: color = "red"
-            else:              color = "bright_red"
+            if frac >= 0.75:   color = "rgb(74,222,128)"
+            elif frac >= 0.55: color = "rgb(34,197,94)"
+            elif frac >= 0.45: color = "rgb(234,179,8)"
+            elif frac >= 0.25: color = "rgb(239,68,68)"
+            else:              color = "rgb(220,38,38)"
 
             if i == n_buckets - 1: label = " HIGH "
             elif i == n_buckets // 2: label = "  MID "
@@ -782,15 +782,15 @@ class HighLowTUI(App):
             if n == 0:
                 bar_color = "dim"
             elif avg_pct >= 0.5:
-                bar_color = "bright_green"
+                bar_color = "rgb(74,222,128)"
             elif avg_pct >= 0.1:
-                bar_color = "green"
+                bar_color = "rgb(34,197,94)"
             elif avg_pct <= -0.5:
-                bar_color = "bright_red"
+                bar_color = "rgb(220,38,38)"
             elif avg_pct <= -0.1:
-                bar_color = "red"
+                bar_color = "rgb(239,68,68)"
             else:
-                bar_color = "yellow"
+                bar_color = "rgb(234,179,8)"
 
             # Signal: combine % direction with breadth (▲/▼ ratio)
             more_highs = h > l * 1.5
@@ -798,15 +798,15 @@ class HighLowTUI(App):
             pct_up     = avg_pct >  0.05
             pct_dn     = avg_pct < -0.05
             if pct_up and more_highs:
-                signal, sig_style = "BULLISH",  "bold bright_green"
+                signal, sig_style = "BULLISH",  "bold rgb(74,222,128)"
             elif pct_up and more_lows:
-                signal, sig_style = "BOUNCING", "bold yellow"
+                signal, sig_style = "BOUNCING", "bold rgb(234,179,8)"
             elif pct_dn and more_lows:
-                signal, sig_style = "BEARISH",  "bold bright_red"
+                signal, sig_style = "BEARISH",  "bold rgb(220,38,38)"
             elif pct_dn and more_highs:
-                signal, sig_style = "FADING",   "bold orange1"
+                signal, sig_style = "FADING",   "bold rgb(251,146,60)"
             elif not more_highs and not more_lows:
-                signal, sig_style = "MIXED",    "dim yellow"
+                signal, sig_style = "MIXED",    "dim rgb(234,179,8)"
             else:
                 signal, sig_style = "NEUTRAL",  "dim"
 
@@ -854,8 +854,8 @@ class HighLowTUI(App):
             if not price:
                 return ("dim", f"{sym:<3}", "     —", "", "", "dim")
             arrow = "▲" if (pct or 0) >= 0 else "▼"
-            color = ("bright_red" if (pct or 0) >= 0 else "bright_green") if sym == "VXX" \
-                    else ("bright_green" if (pct or 0) >= 0 else "bright_red")
+            color = ("rgb(220,38,38)" if (pct or 0) >= 0 else "rgb(74,222,128)") if sym == "VXX" \
+                    else ("rgb(74,222,128)" if (pct or 0) >= 0 else "rgb(220,38,38)")
             pct_str = f"{arrow}{abs(pct):.2f}%" if pct is not None else ""
             return ("dim white", f"{sym:<3}", f"{price:>7.2f}", arrow, pct_str, color)
 
@@ -888,18 +888,18 @@ class HighLowTUI(App):
                 if lag is None:
                     lag_str, dot_style = "waiting for data", "dim"
                 elif lag < 5:
-                    lag_str, dot_style = f"last event {lag:.0f}s ago", "green"
+                    lag_str, dot_style = f"last event {lag:.0f}s ago", "rgb(74,222,128)"
                 elif lag < 30:
-                    lag_str, dot_style = f"last event {lag:.0f}s ago", "yellow"
+                    lag_str, dot_style = f"last event {lag:.0f}s ago", "rgb(234,179,8)"
                 else:
-                    lag_str, dot_style = f"no data in {lag:.0f}s ⚠", "bright_red"
+                    lag_str, dot_style = f"no data in {lag:.0f}s ⚠", "rgb(220,38,38)"
                 out.append(f"{t} ", style="dim")
                 out.append("● ", style=dot_style)
                 out.append(f"{lag_str}\n", style="dim")
             else:
                 pct     = ev["pct"]
                 arrow   = "▲" if pct >= 0 else "▼"
-                pct_col = "bright_green" if pct >= 0 else "bright_red"
+                pct_col = "rgb(74,222,128)" if pct >= 0 else "rgb(220,38,38)"
                 out.append(f"{t} ", style="dim")
                 out.append(f"{ev['sym']:<6} ", style="bold white")
                 out.append(arrow, style=pct_col)
@@ -929,7 +929,7 @@ class HighLowTUI(App):
             l_bar = make_bar(lc, max_val, bar_w, reverse=True)
             h_bar = make_bar(hc, max_val, bar_w)
             lines.append(
-                f"[dim]{lc:>3d}[/dim] [red]{l_bar}[/red] [dim]{tf:>3s}[/dim] [green]{h_bar}[/green] [dim]{hc:<3d}[/dim]"
+                f"[dim]{lc:>3d}[/dim] [rgb(220,38,38)]{l_bar}[/rgb(220,38,38)] [dim]{tf:>3s}[/dim] [rgb(34,197,94)]{h_bar}[/rgb(34,197,94)] [dim]{hc:<3d}[/dim]"
             )
         return "\n".join(lines)
 
@@ -941,7 +941,7 @@ class HighLowTUI(App):
             style = HIGHLIGHT_STYLES.get(h, HIGHLIGHT_STYLES["default"])
             pct = e.get("percentChange") or 0
             sign = "+" if pct >= 0 else ""
-            pct_style = style + Style(color="green" if pct >= 0 else "red")
+            pct_style = style + Style(color="rgb(34,197,94)" if pct >= 0 else "rgb(220,38,38)")
             table.add_row(
                 Text(f"{e['symbol']:<6}", style=style),
                 Text(f"{e['count']:>5}", style=style),
@@ -971,9 +971,9 @@ class HighLowTUI(App):
                 return "░" * width, "dim"
             filled = round(ratio * width)
             bar = "█" * filled + "░" * (width - filled)
-            if ratio >= 0.65:   style = "bright_green"
-            elif ratio <= 0.35: style = "bright_red"
-            else:               style = "yellow"
+            if ratio >= 0.65:   style = "rgb(74,222,128)"
+            elif ratio <= 0.35: style = "rgb(220,38,38)"
+            else:               style = "rgb(234,179,8)"
             return bar, style
 
         r1  = _ratio(h1,  l1)
@@ -989,18 +989,18 @@ class HighLowTUI(App):
             sig_text, sig_style = "NO DATA", "dim"
         elif r_sig >= 0.65:
             trend = "▲" if (r5 is None or r_sig > r5) else "►"
-            sig_text, sig_style = f"BULLISH {trend}", "bright_green"
+            sig_text, sig_style = f"BULLISH {trend}", "rgb(74,222,128)"
         elif r_sig <= 0.35:
             trend = "▼" if (r5 is None or r_sig < r5) else "►"
-            sig_text, sig_style = f"BEARISH {trend}", "bright_red"
+            sig_text, sig_style = f"BEARISH {trend}", "rgb(220,38,38)"
         else:
-            sig_text, sig_style = "NEUTRAL", "yellow"
+            sig_text, sig_style = "NEUTRAL", "rgb(234,179,8)"
 
         now = time.time()
         if self.last_update_time:
             lag = now - self.last_update_time
             lag_str  = f"{lag:.0f}s ago"
-            lag_style = "bright_green" if lag < 3 else ("yellow" if lag < 15 else "bright_red")
+            lag_style = "rgb(74,222,128)" if lag < 3 else ("rgb(234,179,8)" if lag < 15 else "rgb(220,38,38)")
         else:
             lag_str, lag_style = "waiting", "dim"
 
