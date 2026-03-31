@@ -74,6 +74,7 @@ class TradierProvider:
         self._volume_spikes: Dict[str, float] = {}
         self._sse_live: set = set()  # symbols that have received at least one live SSE event
         self._prev_close_prices: Dict[str, float] = {}  # previous session close for % vs close calc
+        self.last_sse_time: float = 0.0  # timestamp of last SSE event (any symbol, any type)
 
     # ------------------------------------------------------------------
     # DataProvider protocol
@@ -322,6 +323,7 @@ class TradierProvider:
 
         self._current_prices[sym] = price
         self._sse_live.add(sym)
+        self.last_sse_time = ts
         updated = False
         in_breadth = sym not in self._exclude_breadth
 

@@ -913,6 +913,34 @@ class HighLowTUI(App):
         self._render_breadth_histogram()
         self._render_sector_breadth()
         self.refresh()
+        # Watchdog: reconnect if SSE stream has been silent for >90s
+        self.call_later(self._watchdog_reconnect)
+
+    async def _watchdog_reconnect(self) -> None:
+        """Reconnect the stream if no SSE event has been received in 90 seconds."""
+        sse_time = getattr(self._provider, "last_sse_time", 0)
+        if sse_time == 0:
+            return  # provider never connected or doesn't track SSE time
+        silent = time.time() - sse_time
+        if silent < 90:
+            return
+        if self.connection_status == "reconnecting":
+            return
+        self.connection_status = "reconnecting"
+        self._refresh_status()
+        try:
+            if self._stream_task and not self._stream_task.done():
+                self._stream_task.cancel()
+                try:
+                    await self._stream_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            await self._provider.disconnect()
+            await self._provider.connect()
+            self._stream_task = asyncio.create_task(self._data_loop())
+        except Exception as e:
+            self.connection_status = f"reconnect failed: {e}"
+            self._refresh_status()
 
     _INDEX_SYMS = ["SPY", "QQQ", "IWM", "VXX", "TLT", "GLD"]
 
