@@ -903,7 +903,8 @@ class HighLowTUI(App):
         """Fires every second. Adds a feed entry so the user can see the UI is alive
         and how long ago the last real HIGHLOW_UPDATE event arrived."""
         now = time.time()
-        lag = now - self.last_update_time if self.last_update_time else None
+        sse_t = getattr(self._provider, "last_sse_time", 0)
+        lag = now - sse_t if sse_t else None
         self._feed_events.appendleft({"ts": now, "sym": None, "lag": lag})
         # Inject fresh prices so histogram stays live between H/L events
         if hasattr(self._provider, "current_prices"):
@@ -1100,8 +1101,9 @@ class HighLowTUI(App):
             sig_text, sig_style = "NEUTRAL", "rgb(234,179,8)"
 
         now = time.time()
-        if self.last_update_time:
-            lag = now - self.last_update_time
+        sse_t = getattr(self._provider, "last_sse_time", 0)
+        if sse_t:
+            lag = now - sse_t
             lag_str  = f"{lag:.0f}s ago"
             lag_style = "rgb(74,222,128)" if lag < 3 else ("rgb(234,179,8)" if lag < 15 else "rgb(220,38,38)")
         else:
