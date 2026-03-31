@@ -296,11 +296,15 @@ class HighLowTUI(App):
         self._feed_last_sec: int = 0
         self._stream_task = None
         self._start_time = time.time()
-        # Breadth histogram snapshots for 5-min reference marker
+        # Breadth histogram snapshots — used to establish the locked 5-min reference
         # Each entry: (timestamp, buckets_list)
         self._breadth_snapshots: deque = deque(maxlen=400)
+        # Locked reference bucket counts — set once when first snapshot >= 5 min old, never updated
+        self._breadth_ref_buckets: list | None = None
         # Sector snapshots for 5-min reference: (timestamp, {sector: avg_pct})
         self._sector_snapshots: deque = deque(maxlen=400)
+        # Locked sector reference — set once, never updated
+        self._sector_ref_pcts: dict | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -702,13 +706,12 @@ class HighLowTUI(App):
         now = time.time()
         self._breadth_snapshots.append((now, list(buckets)))
 
-        # Find snapshot closest to 5 minutes ago
-        target = now - 300
-        prev_buckets = None
-        for ts, snap in self._breadth_snapshots:
-            if ts >= target:
-                prev_buckets = snap
-                break
+        # Lock in the reference once when first snapshot reaches 5 min old — never update after
+        if self._breadth_ref_buckets is None:
+            for ts, snap in self._breadth_snapshots:
+                if now - ts >= 300:
+                    self._breadth_ref_buckets = snap
+                    break
 
         max_count = max(buckets) or 1
         near_high = sum(buckets[int(n_buckets * 0.7):])
@@ -723,8 +726,8 @@ class HighLowTUI(App):
         out.append("BREADTH  ", style="bold dim white")
         out.append(signal, style=f"bold {sig_col}")
         out.append(f"  {total} symbols", style="dim")
-        if prev_buckets:
-            out.append("  │ = 5m ago", style="dim")
+        if self._breadth_ref_buckets:
+            out.append("  │ = open ref", style="dim")
         out.append("\n")
 
         # Top row = near session high (1.0), bottom = near session low (0.0)
@@ -745,9 +748,9 @@ class HighLowTUI(App):
 
             out.append(label, style="dim white")
 
-            if prev_buckets is not None:
+            if self._breadth_ref_buckets is not None:
                 # Clamp marker position so total chars always == bar_max_w
-                m = min(round(prev_buckets[i] / max_count * bar_max_w), bar_max_w - 1)
+                m = min(round(self._breadth_ref_buckets[i] / max_count * bar_max_w), bar_max_w - 1)
                 if bar_len > m:
                     # Bar grew past marker: █×m │ █×(bar_len-m-1) ░×rest
                     out.append("█" * m, style=color)
@@ -817,13 +820,12 @@ class HighLowTUI(App):
         now = time.time()
         self._sector_snapshots.append((now, {s: stat_map[s][0] for s in stat_map}))
 
-        # Find snapshot closest to 5 minutes ago
-        target = now - 300
-        prev_pcts = None
-        for ts, snap in self._sector_snapshots:
-            if ts >= target:
-                prev_pcts = snap
-                break
+        # Lock in the reference once when first snapshot reaches 5 min old — never update after
+        if self._sector_ref_pcts is None:
+            for ts, snap in self._sector_snapshots:
+                if now - ts >= 300:
+                    self._sector_ref_pcts = snap
+                    break
 
         for sector, avg_pct, h, l, n in ordered:
             filled = min(bar_max, round(abs(avg_pct) / PCT_SCALE * bar_max))
@@ -864,8 +866,8 @@ class HighLowTUI(App):
             out.append(" ")
 
             # Draw bar with 5-min marker if available (always exactly bar_max chars)
-            if prev_pcts is not None and sector in prev_pcts:
-                prev_filled = min(bar_max - 1, round(abs(prev_pcts[sector]) / PCT_SCALE * bar_max))
+            if self._sector_ref_pcts is not None and sector in self._sector_ref_pcts:
+                prev_filled = min(bar_max - 1, round(abs(self._sector_ref_pcts[sector]) / PCT_SCALE * bar_max))
                 m = min(prev_filled, bar_max - 1)
                 if filled > m:
                     out.append("█" * m, style=bar_color)
