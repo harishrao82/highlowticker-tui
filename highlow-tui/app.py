@@ -299,6 +299,8 @@ class HighLowTUI(App):
         # Breadth histogram snapshots for 5-min reference marker
         # Each entry: (timestamp, buckets_list)
         self._breadth_snapshots: deque = deque(maxlen=400)
+        # Sector snapshots for 5-min reference: (timestamp, {sector: avg_pct})
+        self._sector_snapshots: deque = deque(maxlen=400)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -744,21 +746,20 @@ class HighLowTUI(App):
             out.append(label, style="dim white")
 
             if prev_buckets is not None:
-                prev_len = round(prev_buckets[i] / max_count * bar_max_w)
-                if bar_len >= prev_len:
-                    # Bar grew or unchanged: fill to prev_len, marker, fill rest
-                    out.append("█" * prev_len, style=color)
-                    if prev_len < bar_max_w:
-                        out.append("│", style="bold white")
-                        out.append("█" * max(0, bar_len - prev_len - 1), style=color)
-                        out.append("░" * max(0, bar_max_w - bar_len), style="dim")
+                # Clamp marker position so total chars always == bar_max_w
+                m = min(round(prev_buckets[i] / max_count * bar_max_w), bar_max_w - 1)
+                if bar_len > m:
+                    # Bar grew past marker: █×m │ █×(bar_len-m-1) ░×rest
+                    out.append("█" * m, style=color)
+                    out.append("│", style="bold white")
+                    out.append("█" * (bar_len - m - 1), style=color)
+                    out.append("░" * (bar_max_w - bar_len), style="dim")
                 else:
-                    # Bar shrank: fill to curr, empty space, marker at prev_len
+                    # Bar at or behind marker: █×bar_len ░×gap │ ░×rest
                     out.append("█" * bar_len, style=color)
-                    out.append("░" * max(0, prev_len - bar_len), style="dim")
-                    if prev_len < bar_max_w:
-                        out.append("│", style="bold white")
-                        out.append("░" * max(0, bar_max_w - prev_len - 1), style="dim")
+                    out.append("░" * (m - bar_len), style="dim")
+                    out.append("│", style="bold white")
+                    out.append("░" * (bar_max_w - m - 1), style="dim")
             else:
                 out.append("█" * bar_len, style=color)
                 out.append("░" * (bar_max_w - bar_len), style="dim")
@@ -812,9 +813,20 @@ class HighLowTUI(App):
         seen = set(_SECTOR_ORDER)
         ordered += [(s, *stat_map[s]) for s in stat_map if s not in seen]
 
+        # Save sector snapshot for 5-min reference marker
+        now = time.time()
+        self._sector_snapshots.append((now, {s: stat_map[s][0] for s in stat_map}))
+
+        # Find snapshot closest to 5 minutes ago
+        target = now - 300
+        prev_pcts = None
+        for ts, snap in self._sector_snapshots:
+            if ts >= target:
+                prev_pcts = snap
+                break
+
         for sector, avg_pct, h, l, n in ordered:
             filled = min(bar_max, round(abs(avg_pct) / PCT_SCALE * bar_max))
-            empty  = bar_max - filled
 
             if n == 0:
                 bar_color = "dim"
@@ -850,10 +862,27 @@ class HighLowTUI(App):
             label = f"{sector[:12]:<12}"
             out.append(label, style="white")
             out.append(" ")
-            out.append("█" * filled, style=bar_color)
-            out.append("░" * empty,  style="dim")
-            out.append(f" ▲{h:<3}", style="bold green")
-            out.append(f"▼{l:<3}", style="bold red")
+
+            # Draw bar with 5-min marker if available (always exactly bar_max chars)
+            if prev_pcts is not None and sector in prev_pcts:
+                prev_filled = min(bar_max - 1, round(abs(prev_pcts[sector]) / PCT_SCALE * bar_max))
+                m = min(prev_filled, bar_max - 1)
+                if filled > m:
+                    out.append("█" * m, style=bar_color)
+                    out.append("│", style="bold white")
+                    out.append("█" * (filled - m - 1), style=bar_color)
+                    out.append("░" * (bar_max - filled), style="dim")
+                else:
+                    out.append("█" * filled, style=bar_color)
+                    out.append("░" * (m - filled), style="dim")
+                    out.append("│", style="bold white")
+                    out.append("░" * (bar_max - m - 1), style="dim")
+            else:
+                out.append("█" * filled, style=bar_color)
+                out.append("░" * (bar_max - filled), style="dim")
+
+            out.append(f" ▲{h:<3}", style="bold rgb(34,197,94)")
+            out.append(f"▼{l:<3}", style="bold rgb(220,38,38)")
             out.append(f"{avg_pct:+.2f}% ", style=f"bold {bar_color}" if n else "dim")
             out.append(f"{signal}\n", style=sig_style if n else "dim")
 
