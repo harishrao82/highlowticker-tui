@@ -131,6 +131,11 @@ class TradierProvider:
     def get_metadata(self) -> dict:
         return {"name": "Tradier", "refresh_rate": 0.0, "is_realtime": True}
 
+    @property
+    def current_prices(self) -> dict:
+        """Live snapshot of all tracked symbol prices, updated on every SSE tick."""
+        return dict(self._current_prices)
+
     def get_breadth_state(self) -> dict:
         """Snapshot current breadth state for persistence."""
         cutoff = time.time() - PRUNE_WINDOW

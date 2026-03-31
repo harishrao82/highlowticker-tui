@@ -296,6 +296,9 @@ class HighLowTUI(App):
         self._feed_last_sec: int = 0
         self._stream_task = None
         self._start_time = time.time()
+        # Breadth histogram snapshots for 5-min reference marker
+        # Each entry: (timestamp, buckets_list)
+        self._breadth_snapshots: deque = deque(maxlen=400)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -693,6 +696,18 @@ class HighLowTUI(App):
         for pos in positions:
             buckets[min(n_buckets - 1, int(pos * n_buckets))] += 1
 
+        # Save snapshot for 5-min reference marker
+        now = time.time()
+        self._breadth_snapshots.append((now, list(buckets)))
+
+        # Find snapshot closest to 5 minutes ago
+        target = now - 300
+        prev_buckets = None
+        for ts, snap in self._breadth_snapshots:
+            if ts >= target:
+                prev_buckets = snap
+                break
+
         max_count = max(buckets) or 1
         near_high = sum(buckets[int(n_buckets * 0.7):])
         near_low  = sum(buckets[:int(n_buckets * 0.3)])
@@ -706,6 +721,8 @@ class HighLowTUI(App):
         out.append("BREADTH  ", style="bold dim white")
         out.append(signal, style=f"bold {sig_col}")
         out.append(f"  {total} symbols", style="dim")
+        if prev_buckets:
+            out.append("  │ = 5m ago", style="dim")
         out.append("\n")
 
         # Top row = near session high (1.0), bottom = near session low (0.0)
@@ -725,7 +742,27 @@ class HighLowTUI(App):
             else:                   label = "      "
 
             out.append(label, style="dim white")
-            out.append("█" * bar_len, style=color)
+
+            if prev_buckets is not None:
+                prev_len = round(prev_buckets[i] / max_count * bar_max_w)
+                if bar_len >= prev_len:
+                    # Bar grew or unchanged: fill to prev_len, marker, fill rest
+                    out.append("█" * prev_len, style=color)
+                    if prev_len < bar_max_w:
+                        out.append("│", style="bold white")
+                        out.append("█" * max(0, bar_len - prev_len - 1), style=color)
+                        out.append("░" * max(0, bar_max_w - bar_len), style="dim")
+                else:
+                    # Bar shrank: fill to curr, empty space, marker at prev_len
+                    out.append("█" * bar_len, style=color)
+                    out.append("░" * max(0, prev_len - bar_len), style="dim")
+                    if prev_len < bar_max_w:
+                        out.append("│", style="bold white")
+                        out.append("░" * max(0, bar_max_w - prev_len - 1), style="dim")
+            else:
+                out.append("█" * bar_len, style=color)
+                out.append("░" * (bar_max_w - bar_len), style="dim")
+
             out.append(f" {count}\n", style="dim")
 
         self._w_momentum.update(out)
@@ -834,8 +871,12 @@ class HighLowTUI(App):
         now = time.time()
         lag = now - self.last_update_time if self.last_update_time else None
         self._feed_events.appendleft({"ts": now, "sym": None, "lag": lag})
+        # Inject fresh prices so histogram stays live between H/L events
+        if hasattr(self._provider, "current_prices"):
+            self.last_state["currentPrices"] = self._provider.current_prices
         self._refresh_live_feed()
         self._refresh_index_prices()
+        self._render_breadth_histogram()
         self._render_sector_breadth()
         self.refresh()
 
