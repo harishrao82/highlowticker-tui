@@ -702,14 +702,15 @@ class HighLowTUI(App):
         for pos in positions:
             buckets[min(n_buckets - 1, int(pos * n_buckets))] += 1
 
-        # Save snapshot for 5-min reference marker
+        # Save snapshot only when we have meaningful live data (skip empty startup frames)
         now = time.time()
-        self._breadth_snapshots.append((now, list(buckets)))
+        if total > 0:
+            self._breadth_snapshots.append((now, list(buckets)))
 
-        # Lock in the reference once when first snapshot reaches 5 min old — never update after
+        # Lock in the reference once when first non-empty snapshot reaches 5 min old
         if self._breadth_ref_buckets is None:
             for ts, snap in self._breadth_snapshots:
-                if now - ts >= 300:
+                if now - ts >= 300 and any(v > 0 for v in snap):
                     self._breadth_ref_buckets = snap
                     break
 
@@ -816,14 +817,16 @@ class HighLowTUI(App):
         seen = set(_SECTOR_ORDER)
         ordered += [(s, *stat_map[s]) for s in stat_map if s not in seen]
 
-        # Save sector snapshot for 5-min reference marker
+        # Save sector snapshot only when we have real price data
         now = time.time()
-        self._sector_snapshots.append((now, {s: stat_map[s][0] for s in stat_map}))
+        snap_pcts = {s: stat_map[s][0] for s in stat_map}
+        if any(abs(v) > 0.001 for v in snap_pcts.values()):
+            self._sector_snapshots.append((now, snap_pcts))
 
-        # Lock in the reference once when first snapshot reaches 5 min old — never update after
+        # Lock in the reference once when first non-zero snapshot reaches 5 min old
         if self._sector_ref_pcts is None:
             for ts, snap in self._sector_snapshots:
-                if now - ts >= 300:
+                if now - ts >= 300 and any(abs(v) > 0.001 for v in snap.values()):
                     self._sector_ref_pcts = snap
                     break
 
