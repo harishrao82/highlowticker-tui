@@ -909,6 +909,8 @@ class HighLowTUI(App):
         # Inject fresh prices so histogram stays live between H/L events
         if hasattr(self._provider, "current_prices"):
             self.last_state["currentPrices"] = self._provider.current_prices
+        if hasattr(self._provider, "_sse_live") and self._provider._sse_live:
+            self.last_state["liveSymbols"] = list(self._provider._sse_live)
         self._refresh_live_feed()
         self._refresh_index_prices()
         self._render_breadth_histogram()
