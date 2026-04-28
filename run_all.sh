@@ -53,7 +53,7 @@ echo "Sleep prevention: ON (caffeinate)"
 (
     while true; do
         echo "[$(date '+%H:%M:%S')] Starting paper trader..." >> "$LOG_TRADER"
-        $VENV btc_strategy_paper.py >> "$LOG_TRADER" 2>&1
+        $VENV trading/analysis/btc_strategy_paper.py >> "$LOG_TRADER" 2>&1
         echo "[$(date '+%H:%M:%S')] Trader crashed — restarting in 5s..." >> "$LOG_TRADER"
         sleep 5
     done
@@ -67,7 +67,7 @@ sleep 2
 (
     while true; do
         echo "[$(date '+%H:%M:%S')] Starting dashboard..." >> "$LOG_DASH"
-        $VENV btc_dashboard.py >> "$LOG_DASH" 2>&1
+        $VENV trading/analysis/btc_dashboard.py >> "$LOG_DASH" 2>&1
         echo "[$(date '+%H:%M:%S')] Dashboard crashed — restarting in 5s..." >> "$LOG_DASH"
         sleep 5
     done

@@ -33,7 +33,7 @@ start_proc() {
 echo "=== Scallops stack check ==="
 
 # 1. Recorder
-start_proc "recorder"  "poly_scallops_live_shadow.py" "$LOG_DIR/scallops_recorder.log"
+start_proc "recorder"  "trading/polymarket/poly_scallops_live_shadow.py" "$LOG_DIR/scallops_recorder.log"
 
 # 2. Freshness check
 if [[ -f "$TRADES_FILE" ]]; then
@@ -43,9 +43,9 @@ if [[ -f "$TRADES_FILE" ]]; then
     if (( age > STALE_AFTER_SEC )); then
         echo "⚠ trades file stale (last update ${age}s ago > ${STALE_AFTER_SEC}s)"
         echo "  killing recorder and restarting..."
-        pkill -f poly_scallops_live_shadow.py || true
+        pkill -f trading/polymarket/poly_scallops_live_shadow.py || true
         sleep 2
-        start_proc "recorder" "poly_scallops_live_shadow.py" "$LOG_DIR/scallops_recorder.log"
+        start_proc "recorder" "trading/polymarket/poly_scallops_live_shadow.py" "$LOG_DIR/scallops_recorder.log"
     else
         echo "✓ trades file fresh (last update ${age}s ago)"
     fi
@@ -54,10 +54,10 @@ else
 fi
 
 # 3. Scallops viewer (port 7332)
-start_proc "scallops_viewer" "scallops_viewer.py" "$LOG_DIR/scallops_viewer.log"
+start_proc "scallops_viewer" "trading/polymarket/scallops_viewer.py" "$LOG_DIR/scallops_viewer.log"
 
 # 4. Poly viewer (port 7333 — the one at /?hours=6)
-start_proc "poly_viewer" "poly_viewer.py" "$LOG_DIR/poly_viewer.log"
+start_proc "poly_viewer" "trading/polymarket/poly_viewer.py" "$LOG_DIR/poly_viewer.log"
 
 echo ""
 echo "Scallops trades viewer:  http://localhost:7332"

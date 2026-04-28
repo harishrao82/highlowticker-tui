@@ -72,12 +72,12 @@ start_if_not_running() {
 
 if [[ "${1:-}" == "stop" ]]; then
     echo "=== Stopping all ==="
-    kill_if_running "Kalshi momentum"        "kalshi_momentum_live.py"
-    kill_if_running "Calibration trader"     "calibration_trader.py"
-    kill_if_running "Coinbase signals"       "coinbase_signal_detector.py"
-    kill_if_running "Scallops recorder"      "poly_scallops_live_shadow.py"
-    kill_if_running "Twin fast detector"     "twin_fast_detector.py"
-    kill_if_running "Scallops fast detector" "scallops_fast_detector.py"
+    kill_if_running "Kalshi momentum"        "trading/kalshi/kalshi_momentum_live.py"
+    kill_if_running "Calibration trader"     "trading/kalshi/calibration_trader.py"
+    kill_if_running "Coinbase signals"       "trading/detectors/coinbase_signal_detector.py"
+    kill_if_running "Scallops recorder"      "trading/polymarket/poly_scallops_live_shadow.py"
+    kill_if_running "Twin fast detector"     "trading/detectors/twin_fast_detector.py"
+    kill_if_running "Scallops fast detector" "trading/detectors/scallops_fast_detector.py"
     # NOTE: btc_recorder is intentionally NOT stopped — it's the long-lived
     # tick archive. Use ./start_trading.sh stop-all if you want to stop it too.
     echo "Done. (btc_recorder.py left running — use 'stop-all' to include it)"
@@ -86,13 +86,13 @@ fi
 
 if [[ "${1:-}" == "stop-all" ]]; then
     echo "=== Stopping ALL including btc_recorder ==="
-    kill_if_running "Kalshi momentum"        "kalshi_momentum_live.py"
-    kill_if_running "Calibration trader"     "calibration_trader.py"
-    kill_if_running "Coinbase signals"       "coinbase_signal_detector.py"
-    kill_if_running "Scallops recorder"      "poly_scallops_live_shadow.py"
-    kill_if_running "Twin fast detector"     "twin_fast_detector.py"
-    kill_if_running "Scallops fast detector" "scallops_fast_detector.py"
-    kill_if_running "BTC recorder"           "btc_recorder.py"
+    kill_if_running "Kalshi momentum"        "trading/kalshi/kalshi_momentum_live.py"
+    kill_if_running "Calibration trader"     "trading/kalshi/calibration_trader.py"
+    kill_if_running "Coinbase signals"       "trading/detectors/coinbase_signal_detector.py"
+    kill_if_running "Scallops recorder"      "trading/polymarket/poly_scallops_live_shadow.py"
+    kill_if_running "Twin fast detector"     "trading/detectors/twin_fast_detector.py"
+    kill_if_running "Scallops fast detector" "trading/detectors/scallops_fast_detector.py"
+    kill_if_running "BTC recorder"           "trading/recorders/btc_recorder.py"
     echo "Done."
     exit 0
 fi
@@ -100,12 +100,12 @@ fi
 # ── Start mode ───────────────────────────────────────────────────────
 
 echo "=== Stopping existing trading processes (btc_recorder left alone) ==="
-kill_if_running "Kalshi momentum"        "kalshi_momentum_live.py"
-kill_if_running "Calibration trader"     "calibration_trader.py"
-kill_if_running "Coinbase signals"       "coinbase_signal_detector.py"
-kill_if_running "Scallops recorder"      "poly_scallops_live_shadow.py"
-kill_if_running "Twin fast detector"     "twin_fast_detector.py"
-kill_if_running "Scallops fast detector" "scallops_fast_detector.py"
+kill_if_running "Kalshi momentum"        "trading/kalshi/kalshi_momentum_live.py"
+kill_if_running "Calibration trader"     "trading/kalshi/calibration_trader.py"
+kill_if_running "Coinbase signals"       "trading/detectors/coinbase_signal_detector.py"
+kill_if_running "Scallops recorder"      "trading/polymarket/poly_scallops_live_shadow.py"
+kill_if_running "Twin fast detector"     "trading/detectors/twin_fast_detector.py"
+kill_if_running "Scallops fast detector" "trading/detectors/scallops_fast_detector.py"
 # Also kill any caffeinate wrappers left behind
 pkill -f "caffeinate.*kalshi_momentum_live" 2>/dev/null
 pkill -f "caffeinate.*calibration_trader" 2>/dev/null
@@ -116,36 +116,36 @@ pkill -f "caffeinate.*scallops_fast_detector" 2>/dev/null
 
 echo ""
 echo "=== Ensuring BTC recorder is running (don't kill, only start if down) ==="
-start_if_not_running "BTC recorder" "btc_recorder.py" "$LOG_DIR/btc_recorder.log"
+start_if_not_running "BTC recorder" "trading/recorders/btc_recorder.py" "$LOG_DIR/btc_recorder.log"
 
 echo ""
 echo "=== (Re)building calibration table ==="
-$PY build_calibration_table.py 2>&1 | tail -3
+$PY trading/analysis/build_calibration_table.py 2>&1 | tail -3
 
 echo ""
 echo "=== Starting Scallops recorder (REST poll, both Twin + Scallops) ==="
-start_bg "Scallops recorder" "poly_scallops_live_shadow.py" "$LOG_DIR/scallops_recorder.log"
+start_bg "Scallops recorder" "trading/polymarket/poly_scallops_live_shadow.py" "$LOG_DIR/scallops_recorder.log"
 
 echo ""
 echo "=== Starting Twin fast detector (PM WS, ~1-2s lag) ==="
-start_bg "Twin fast detector" "twin_fast_detector.py" "$LOG_DIR/twin_fast.log"
+start_bg "Twin fast detector" "trading/detectors/twin_fast_detector.py" "$LOG_DIR/twin_fast.log"
 
 echo ""
 echo "=== Starting Scallops fast detector (PM WS, ~1-2s lag) ==="
-start_bg "Scallops fast detector" "scallops_fast_detector.py" "$LOG_DIR/scallops_fast.log"
+start_bg "Scallops fast detector" "trading/detectors/scallops_fast_detector.py" "$LOG_DIR/scallops_fast.log"
 
 echo ""
 echo "=== Starting Coinbase signal detector ==="
-start_bg "Coinbase signals" "coinbase_signal_detector.py" "$LOG_DIR/coinbase_signals.log"
+start_bg "Coinbase signals" "trading/detectors/coinbase_signal_detector.py" "$LOG_DIR/coinbase_signals.log"
 
 echo ""
 echo "=== Starting Kalshi momentum trader ==="
-start_bg "Kalshi momentum" "kalshi_momentum_live.py" "$LOG_DIR/kalshi_momentum.log" \
+start_bg "Kalshi momentum" "trading/kalshi/kalshi_momentum_live.py" "$LOG_DIR/kalshi_momentum.log" \
     "STATUS_SLIM=1 STATUS_INTERVAL=15"
 
 echo ""
 echo "=== Starting Calibration trader (mispricing exploit) ==="
-start_bg "Calibration trader" "calibration_trader.py" "$LOG_DIR/calib_trader.log"
+start_bg "Calibration trader" "trading/kalshi/calibration_trader.py" "$LOG_DIR/calib_trader.log"
 
 echo ""
 echo "════════════════════════════════════════════"
