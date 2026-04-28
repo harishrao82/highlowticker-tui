@@ -24,6 +24,11 @@ from statistics import mean, median, stdev
 from rich.console import Console
 from rich.table import Table
 
+# Cross-folder import: trading/analysis/btc_vol_profile
+import sys as _sys
+from pathlib import Path as _P
+_sys.path.insert(0, str(_P(__file__).resolve().parent.parent / 'analysis'))
+
 import btc_vol_profile
 
 STATE = Path.home() / ".btc_strategy_state.json"

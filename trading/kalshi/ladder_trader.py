@@ -39,6 +39,11 @@ from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from dotenv import load_dotenv
 from rich.console import Console
 
+# Cross-folder import: trading/analysis/btc_vol_profile
+import sys as _sys
+from pathlib import Path as _P
+_sys.path.insert(0, str(_P(__file__).resolve().parent.parent / 'analysis'))
+
 import btc_vol_profile
 
 load_dotenv()
