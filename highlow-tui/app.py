@@ -296,15 +296,27 @@ class HighLowTUI(App):
         self._feed_last_sec: int = 0
         self._stream_task = None
         self._start_time = time.time()
-        # Breadth histogram snapshots — used to establish the locked 5-min reference
-        # Each entry: (timestamp, buckets_list)
-        self._breadth_snapshots: deque = deque(maxlen=400)
+        # Breadth histogram snapshots — used to establish the locked 5-min reference.
+        # Each entry: (timestamp, buckets_list). Sized to comfortably exceed 5 min of
+        # history even when render rate is 3Hz (heartbeat + throttled momentum).
+        self._breadth_snapshots: deque = deque(maxlen=2000)
         # Locked reference bucket counts — set once when first snapshot >= 5 min old, never updated
         self._breadth_ref_buckets: list | None = None
         # Sector snapshots for 5-min reference: (timestamp, {sector: avg_pct})
-        self._sector_snapshots: deque = deque(maxlen=400)
+        self._sector_snapshots: deque = deque(maxlen=2000)
         # Locked sector reference — set once, never updated
         self._sector_ref_pcts: dict | None = None
+
+        # Breadth regime classifier (5-state: THRUST UP / DRIFT UP / CHOP / DRIFT DOWN / CAPITULATION)
+        from core.regime_classifier import RegimeClassifier
+        from core.spike_detector import SpikeDetector
+        self._regime = RegimeClassifier(universe_size=500)
+        self._spike  = SpikeDetector()
+        self._regime_log_path = _ROOT / "logs" / "regime.log"
+        self._spike_log_path  = _ROOT / "logs" / "spike.log"
+        # Cached from _render_sector_breadth so _refresh_breadth can read it
+        # without recomputing. Populated each render: list of (sector, avg_pct, h, l, n).
+        self._last_sector_stats: list = []
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -663,6 +675,62 @@ class HighLowTUI(App):
 
         return grid
 
+    @staticmethod
+    def _diverging_bar(out: Text, value: float, ref, scale: float, bar_max: int,
+                       color: str, side: str = "auto") -> None:
+        """Append a fixed-width diverging bar to `out`.
+
+        Layout: [left half] │ [right half], total bar_max chars.
+        Bar grows outward from the center axis. Positive (or side="right") fills
+        right; negative (or side="left") fills left. `ref` (optional) is plotted
+        as a "┊" marker at the historical bar tip on the same side.
+        """
+        left_w  = (bar_max - 1) // 2
+        right_w = bar_max - left_w - 1
+        if side == "auto":
+            side = "right" if value >= 0 else "left"
+        side_w = right_w if side == "right" else left_w
+        if side_w <= 0 or scale <= 0:
+            out.append(" " * bar_max, style="dim")
+            return
+        fill = min(side_w, round(abs(value) / scale * side_w))
+        ref_fill = None
+        if ref is not None:
+            ref_fill = min(side_w - 1, max(0, round(abs(ref) / scale * side_w)))
+
+        if side == "right":
+            out.append(" " * left_w, style="dim")
+            out.append("│", style="bold white")
+            if ref_fill is None:
+                out.append("█" * fill, style=color)
+                out.append("░" * (right_w - fill), style="dim")
+            elif fill > ref_fill:
+                out.append("█" * ref_fill, style=color)
+                out.append("┊", style="bold white")
+                out.append("█" * (fill - ref_fill - 1), style=color)
+                out.append("░" * (right_w - fill), style="dim")
+            else:
+                out.append("█" * fill, style=color)
+                out.append("░" * (ref_fill - fill), style="dim")
+                out.append("┊", style="bold white")
+                out.append("░" * (right_w - ref_fill - 1), style="dim")
+        else:  # left
+            if ref_fill is None:
+                out.append("░" * (left_w - fill), style="dim")
+                out.append("█" * fill, style=color)
+            elif fill > ref_fill:
+                out.append("░" * (left_w - fill), style="dim")
+                out.append("█" * (fill - ref_fill - 1), style=color)
+                out.append("┊", style="bold white")
+                out.append("█" * ref_fill, style=color)
+            else:
+                out.append("░" * (left_w - ref_fill - 1), style="dim")
+                out.append("┊", style="bold white")
+                out.append("░" * (ref_fill - fill), style="dim")
+                out.append("█" * fill, style=color)
+            out.append("│", style="bold white")
+            out.append(" " * right_w, style="dim")
+
     def _render_breadth_histogram(self) -> None:
         if not self._w_momentum:
             return
@@ -707,11 +775,27 @@ class HighLowTUI(App):
         if total > 0:
             self._breadth_snapshots.append((now, list(buckets)))
 
-        # Lock in the reference once when first non-empty snapshot reaches 5 min old
+        # If terminal resized after ref was locked, the saved bucket count is stale.
+        # Drop it and re-lock at the new size.
+        if self._breadth_ref_buckets is not None and len(self._breadth_ref_buckets) != n_buckets:
+            self._breadth_ref_buckets = None
+
+        # Lock in the reference once when first non-empty snapshot reaches 5 min old.
+        # Require matching bucket count so we don't lock a stale-shape snapshot.
         if self._breadth_ref_buckets is None:
             for ts, snap in self._breadth_snapshots:
-                if now - ts >= 300 and any(v > 0 for v in snap):
+                if now - ts >= 300 and len(snap) == n_buckets and any(v > 0 for v in snap):
                     self._breadth_ref_buckets = snap
+                    break
+
+        # Display reference: locked 5-min snapshot if available, otherwise fall back
+        # to the oldest non-empty matching snapshot (so the marker shows from the
+        # start and visually ages until the proper 5-min lock takes over).
+        display_ref = self._breadth_ref_buckets
+        if display_ref is None:
+            for ts, snap in self._breadth_snapshots:
+                if len(snap) == n_buckets and any(v > 0 for v in snap):
+                    display_ref = snap
                     break
 
         max_count = max(buckets) or 1
@@ -727,8 +811,9 @@ class HighLowTUI(App):
         out.append("BREADTH  ", style="bold dim white")
         out.append(signal, style=f"bold {sig_col}")
         out.append(f"  {total} symbols", style="dim")
-        if self._breadth_ref_buckets:
-            out.append("  │ = open ref", style="dim")
+        if display_ref is not None:
+            label = "│ = open ref" if self._breadth_ref_buckets is not None else "┊ = aging ref"
+            out.append(f"  {label}", style="dim")
         out.append("\n")
 
         # Top row = near session high (1.0), bottom = near session low (0.0)
@@ -749,24 +834,10 @@ class HighLowTUI(App):
 
             out.append(label, style="dim white")
 
-            if self._breadth_ref_buckets is not None:
-                # Clamp marker position so total chars always == bar_max_w
-                m = min(round(self._breadth_ref_buckets[i] / max_count * bar_max_w), bar_max_w - 1)
-                if bar_len > m:
-                    # Bar grew past marker: █×m │ █×(bar_len-m-1) ░×rest
-                    out.append("█" * m, style=color)
-                    out.append("│", style="bold white")
-                    out.append("█" * (bar_len - m - 1), style=color)
-                    out.append("░" * (bar_max_w - bar_len), style="dim")
-                else:
-                    # Bar at or behind marker: █×bar_len ░×gap │ ░×rest
-                    out.append("█" * bar_len, style=color)
-                    out.append("░" * (m - bar_len), style="dim")
-                    out.append("│", style="bold white")
-                    out.append("░" * (bar_max_w - m - 1), style="dim")
-            else:
-                out.append("█" * bar_len, style=color)
-                out.append("░" * (bar_max_w - bar_len), style="dim")
+            # Diverging layout: HIGH-region rows extend right, LOW-region rows extend left.
+            ref_count = display_ref[i] if display_ref is not None else None
+            row_side = "right" if frac >= 0.5 else "left"
+            self._diverging_bar(out, count, ref_count, max_count, bar_max_w, color, side=row_side)
 
             out.append(f" {count}\n", style="dim")
 
@@ -807,6 +878,8 @@ class HighLowTUI(App):
             l = sum(1 for s in syms if s in new_lows)
             sector_stats.append((sector, avg_pct, h, l, len(pcts)))
 
+        self._last_sector_stats = sector_stats
+
         _SECTOR_ORDER = [
             "Technology", "Financials", "Healthcare", "Consumer Disc",
             "Comm Services", "Industrials", "Consumer Staples",
@@ -830,9 +903,16 @@ class HighLowTUI(App):
                     self._sector_ref_pcts = snap
                     break
 
-        for sector, avg_pct, h, l, n in ordered:
-            filled = min(bar_max, round(abs(avg_pct) / PCT_SCALE * bar_max))
+        # Display reference: locked if available, else oldest non-empty snapshot
+        # (provisional — ages until the 5-min lock fires, then becomes the locked one).
+        sector_display_ref = self._sector_ref_pcts
+        if sector_display_ref is None:
+            for ts, snap in self._sector_snapshots:
+                if any(abs(v) > 0.001 for v in snap.values()):
+                    sector_display_ref = snap
+                    break
 
+        for sector, avg_pct, h, l, n in ordered:
             if n == 0:
                 bar_color = "dim"
             elif avg_pct >= 0.5:
@@ -868,23 +948,9 @@ class HighLowTUI(App):
             out.append(label, style="white")
             out.append(" ")
 
-            # Draw bar with 5-min marker if available (always exactly bar_max chars)
-            if self._sector_ref_pcts is not None and sector in self._sector_ref_pcts:
-                prev_filled = min(bar_max - 1, round(abs(self._sector_ref_pcts[sector]) / PCT_SCALE * bar_max))
-                m = min(prev_filled, bar_max - 1)
-                if filled > m:
-                    out.append("█" * m, style=bar_color)
-                    out.append("│", style="bold white")
-                    out.append("█" * (filled - m - 1), style=bar_color)
-                    out.append("░" * (bar_max - filled), style="dim")
-                else:
-                    out.append("█" * filled, style=bar_color)
-                    out.append("░" * (m - filled), style="dim")
-                    out.append("│", style="bold white")
-                    out.append("░" * (bar_max - m - 1), style="dim")
-            else:
-                out.append("█" * filled, style=bar_color)
-                out.append("░" * (bar_max - filled), style="dim")
+            ref_pct = sector_display_ref.get(sector) if sector_display_ref is not None else None
+            # Diverging: positive % grows right, negative grows left, zero in middle.
+            self._diverging_bar(out, avg_pct, ref_pct, PCT_SCALE, bar_max, bar_color)
 
             out.append(f" ▲{h:<3}", style="bold rgb(34,197,94)")
             out.append(f"▼{l:<3}", style="bold rgb(220,38,38)")
@@ -1056,6 +1122,35 @@ class HighLowTUI(App):
                 key=f"{prefix}_{i}_{e['symbol']}",
             )
 
+    def _log_regime_transition(self, now: float, res) -> None:
+        """Append a regime transition line to logs/regime.log."""
+        try:
+            self._regime_log_path.parent.mkdir(parents=True, exist_ok=True)
+            ts = datetime.fromtimestamp(now, _ET).strftime("%Y-%m-%d %H:%M:%S")
+            line = (
+                f"{ts} ET  {res.transitioned_from} -> {res.regime}  "
+                f"s1m={res.spread_1m:+.2f} s5m={res.spread_5m:+.2f} s20m={res.spread_20m:+.2f} "
+                f"int1m={res.intensity_1m:.3f}\n"
+            )
+            with open(self._regime_log_path, "a") as f:
+                f.write(line)
+        except Exception:
+            pass
+
+    def _log_spike(self, now: float, res) -> None:
+        """Append a fresh spike fire to logs/spike.log."""
+        try:
+            self._spike_log_path.parent.mkdir(parents=True, exist_ok=True)
+            ts = datetime.fromtimestamp(now, _ET).strftime("%Y-%m-%d %H:%M:%S")
+            line = (
+                f"{ts} ET  {res.state}  h30s={res.h_30s} (μ={res.h_baseline_mean:.1f} z={res.h_z:+.1f})  "
+                f"l30s={res.l_30s} (μ={res.l_baseline_mean:.1f} z={res.l_z:+.1f})\n"
+            )
+            with open(self._spike_log_path, "a") as f:
+                f.write(line)
+        except Exception:
+            pass
+
     def _refresh_breadth(self) -> None:
         if not self._w_health:
             return
@@ -1111,7 +1206,75 @@ class HighLowTUI(App):
         else:
             lag_str, lag_style = "waiting", "dim"
 
+        from core.regime_classifier   import REGIME_COLORS
+        from core.rotation_classifier  import classify_rotation, ROTATION_COLORS
+        from core.spike_detector       import SPIKE_COLORS
+        from core.persistent_leaders   import find_persistent
+
+        live_n = len(self.last_state.get("liveSymbols") or []) or None
+        regime_res = self._regime.classify(high_counts, low_counts, live_universe=live_n, now=now)
+        if regime_res.transitioned_from is not None:
+            self._log_regime_transition(now, regime_res)
+
+        rotation_res = classify_rotation(self._last_sector_stats)
+        spike_res = self._spike.update(high_counts, low_counts, now=now)
+        if spike_res.seconds_since_fire is not None and spike_res.seconds_since_fire < 1.0:
+            self._log_spike(now, spike_res)
+        leaders = find_persistent(self.session_highs, self.session_lows)
+
+        sec = int(regime_res.seconds_in_regime)
+        if sec >= 3600:
+            in_str = f"{sec // 3600}h{(sec % 3600) // 60:02d}m"
+        elif sec >= 60:
+            in_str = f"{sec // 60}m{sec % 60:02d}s"
+        else:
+            in_str = f"{sec}s"
+        regime_color = REGIME_COLORS.get(regime_res.regime, "rgb(234,179,8)")
+        rotation_color = ROTATION_COLORS.get(rotation_res.state, "rgb(234,179,8)")
+
         out = Text()
+        out.append("REGIME   ", style="bold dim white")
+        out.append(f"{regime_res.regime:<13}", style=f"bold {regime_color}")
+        out.append(f" in {in_str}", style="dim")
+        if regime_res.transitioned_from:
+            out.append(f"   (was {regime_res.transitioned_from})", style="dim")
+        out.append("\n")
+
+        out.append("ROTATION ", style="bold dim white")
+        out.append(f"{rotation_res.state:<13}", style=f"bold {rotation_color}")
+        if rotation_res.leaders or rotation_res.laggards:
+            rot_lead_str = ",".join(s[:8] for s, _ in rotation_res.leaders) or "—"
+            rot_lag_str  = ",".join(s[:8] for s, _ in rotation_res.laggards) or "—"
+            out.append(f" lead:{rot_lead_str}", style="dim rgb(74,222,128)")
+            out.append(f"  lag:{rot_lag_str}", style="dim rgb(239,68,68)")
+            out.append(f"  disp={rotation_res.dispersion:.2f}%", style="dim")
+        out.append("\n")
+
+        if spike_res.state != "NONE":
+            spike_color = SPIKE_COLORS.get(spike_res.state, "rgb(234,179,8)")
+            since = spike_res.seconds_since_fire or 0
+            out.append("SPIKE    ", style="bold dim white")
+            out.append(f"{spike_res.state:<13}", style=f"bold {spike_color}")
+            out.append(f" {since:.0f}s ago", style="dim")
+            out.append(f"  h30s={spike_res.h_30s} (z={spike_res.h_z:+.1f})", style="dim")
+            out.append(f"  l30s={spike_res.l_30s} (z={spike_res.l_z:+.1f})", style="dim")
+            out.append("\n")
+
+        if leaders.highs or leaders.lows:
+            out.append("LEADERS  ", style="bold dim white")
+            if leaders.highs:
+                out.append("↑ ", style="rgb(74,222,128)")
+                out.append(" ".join(f"{s}×{c}" for s, c in leaders.highs), style="rgb(74,222,128)")
+            else:
+                out.append("↑ —", style="dim")
+            out.append("   ")
+            if leaders.lows:
+                out.append("↓ ", style="rgb(239,68,68)")
+                out.append(" ".join(f"{s}×{c}" for s, c in leaders.lows), style="rgb(239,68,68)")
+            else:
+                out.append("↓ —", style="dim")
+            out.append("\n")
+
         out.append("BREADTH  ", style="bold dim white")
         out.append(sig_text, style=f"bold {sig_style}")
         out.append("   LAST ", style="dim")

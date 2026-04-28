@@ -64,3 +64,13 @@ highlow-tui-heavy/
 license-server/
 docs/
 HIGHLOW_TUI_MARKETING.md
+
+# Trading-bot runtime junk
+logs/
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.html
+a.ipynb
+.ipynb_checkpoints/

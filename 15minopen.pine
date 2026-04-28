@@ -1,0 +1,37 @@
+// 15-Minute Opening Level
+// Shows the 15-min candle open price on sub-15-min charts
+
+//@version=4
+study(title = "15m Open", shorttitle = "15mO", overlay = true)
+
+line_width = input(defval = 2, title = "Line Width", type = input.integer, minval = 1, maxval = 10)
+offset     = input(defval = 30, title = "Right Offset", type = input.integer, minval = 0, maxval = 50)
+line_col   = input(defval = color.orange, title = "Line Color", type = input.color)
+label_col  = input(defval = color.white, title = "Label Text Color", type = input.color)
+show_label = input(defval = true, title = "Show Label", type = input.bool)
+
+res = "15"
+
+o = security(syminfo.tickerid, res, open[0], gaps = barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+bars_passed = barssince(change(time(res)) != 0)
+dt = change(time)
+
+x1 = time + round(dt * (-bars_passed))
+xn = time + round(dt * offset)
+
+var line ln = na
+var label lb = na
+
+if o[1] != o
+    ln := line.new(x1 = x1, y1 = o, x2 = xn, y2 = o, xloc = xloc.bar_time, color = line_col, style = line.style_solid, width = line_width)
+    line.delete(ln[1])
+    if show_label
+        lb := label.new(x = xn, y = o, xloc = xloc.bar_time, text = "15m, " + tostring(open[bars_passed]), color = line_col, textcolor = label_col, style = label.style_label_left)
+        label.delete(lb[1])
+
+if line.get_x2(ln) != bar_index
+    line.set_x2(ln, xn)
+
+if show_label and label.get_x(lb) != bar_index
+    label.set_x(lb, xn)

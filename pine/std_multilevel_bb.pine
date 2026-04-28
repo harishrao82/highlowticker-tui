@@ -1,0 +1,336 @@
+//@version=5
+indicator('Std Dev Levels + BB (Multi-TF)', overlay=true, max_lines_count=500)
+
+// ── Bollinger Bands ──────────────────────────────────────────────────────────
+grpBB = 'Bollinger Bands ━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+bb_on     = input.bool(true,    'Enable BB',  group=grpBB, inline='bb0')
+bb_len    = input.int(20,       'Length',     group=grpBB, inline='bb0', minval=1)
+bb_maType = input.string('SMA', 'MA Type',   group=grpBB, inline='bb1', options=['SMA','EMA','SMMA (RMA)','WMA','VWMA'])
+bb_src    = input.source(close,  'Source',     group=grpBB, inline='bb1')
+bb_mult   = input.float(2.0,    'StdDev',    group=grpBB, inline='bb2', minval=0.001, maxval=50)
+bb_offset = input.int(0,        'Offset',    group=grpBB, inline='bb2', minval=-500, maxval=500)
+bb_hlSplit = input.bool(false, 'H/L split (upper uses highs, lower uses lows)', group=grpBB, inline='bb3')
+
+bb_ma(float source, int length, string _type) =>
+    switch _type
+        'SMA'        => ta.sma(source, length)
+        'EMA'        => ta.ema(source, length)
+        'SMMA (RMA)' => ta.rma(source, length)
+        'WMA'        => ta.wma(source, length)
+        'VWMA'       => ta.vwma(source, length)
+
+bb_basis   = bb_ma(bb_src, bb_len, bb_maType)
+bb_devUp   = bb_mult * ta.stdev(bb_hlSplit ? high : bb_src, bb_len)
+bb_devDown = bb_mult * ta.stdev(bb_hlSplit ? low  : bb_src, bb_len)
+bb_upper = bb_basis + bb_devUp
+bb_lower = bb_basis - bb_devDown
+
+plot(bb_on ? bb_basis : na, 'BB Basis', color=#2962FF, offset=bb_offset)
+p_bb_upper = plot(bb_on ? bb_upper : na, 'BB Upper', color=#F23645, offset=bb_offset)
+p_bb_lower = plot(bb_on ? bb_lower : na, 'BB Lower', color=#089981, offset=bb_offset)
+fill(p_bb_upper, p_bb_lower, title='BB Background', color=bb_on ? color.rgb(33, 150, 243, 95) : na)
+
+// ── Timeframe 1 ───────────────────────────────────────────────────────────────
+grp1 = 'Timeframe 1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+tf1_on  = input.bool(true,  'TF 1', group=grp1, inline='tf1')
+tf1     = input.timeframe('D', '',   group=grp1, inline='tf1')
+tf1_len = input.int(5, 'Period',     group=grp1, inline='tf1', minval=2)
+tf1_max = input.int(1, 'Show X back',group=grp1, inline='tf1', minval=1, maxval=20)
+tf1_mirror = input.bool(true, 'Mirror', group=grp1, inline='tf1')
+
+tf1_l0_on  = input.bool(true, 'Prev Close', group=grp1, inline='tf1_0')
+tf1_l0_col = input.color(color.gray,        '', group=grp1, inline='tf1_0')
+tf1_l0_sty = input.string('⎯⎯⎯', '',       group=grp1, inline='tf1_0', options=['⎯⎯⎯','----','····'])
+tf1_l0_wid = input.int(1, '',              group=grp1, inline='tf1_0', options=[1,2,3,4])
+
+tf1_l1_on  = input.bool(true, '0.5σ',      group=grp1, inline='tf1_1')
+tf1_l1_mul = input.float(0.5, '',           group=grp1, inline='tf1_1')
+tf1_l1_col = input.color(color.new(color.blue, 30),   '', group=grp1, inline='tf1_1')
+tf1_l1_sty = input.string('⎯⎯⎯', '',       group=grp1, inline='tf1_1', options=['⎯⎯⎯','----','····'])
+tf1_l1_wid = input.int(1, '',              group=grp1, inline='tf1_1', options=[1,2,3,4])
+
+tf1_l2_on  = input.bool(true, '1.0σ',      group=grp1, inline='tf1_2')
+tf1_l2_mul = input.float(1.0, '',           group=grp1, inline='tf1_2')
+tf1_l2_col = input.color(color.new(color.orange, 10), '', group=grp1, inline='tf1_2')
+tf1_l2_sty = input.string('⎯⎯⎯', '',       group=grp1, inline='tf1_2', options=['⎯⎯⎯','----','····'])
+tf1_l2_wid = input.int(2, '',              group=grp1, inline='tf1_2', options=[1,2,3,4])
+
+tf1_l3_on  = input.bool(true, '2.0σ',      group=grp1, inline='tf1_3')
+tf1_l3_mul = input.float(2.0, '',           group=grp1, inline='tf1_3')
+tf1_l3_col = input.color(color.new(color.red, 10),    '', group=grp1, inline='tf1_3')
+tf1_l3_sty = input.string('⎯⎯⎯', '',       group=grp1, inline='tf1_3', options=['⎯⎯⎯','----','····'])
+tf1_l3_wid = input.int(2, '',              group=grp1, inline='tf1_3', options=[1,2,3,4])
+
+// ── Timeframe 2 ───────────────────────────────────────────────────────────────
+grp2 = 'Timeframe 2 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+tf2_on  = input.bool(false, 'TF 2', group=grp2, inline='tf2')
+tf2     = input.timeframe('W', '',   group=grp2, inline='tf2')
+tf2_len = input.int(5, 'Period',     group=grp2, inline='tf2', minval=2)
+tf2_max = input.int(1, 'Show X back',group=grp2, inline='tf2', minval=1, maxval=20)
+tf2_mirror = input.bool(true, 'Mirror', group=grp2, inline='tf2')
+
+tf2_l0_on  = input.bool(true, 'Prev Close', group=grp2, inline='tf2_0')
+tf2_l0_col = input.color(color.gray,        '', group=grp2, inline='tf2_0')
+tf2_l0_sty = input.string('----', '',       group=grp2, inline='tf2_0', options=['⎯⎯⎯','----','····'])
+tf2_l0_wid = input.int(1, '',              group=grp2, inline='tf2_0', options=[1,2,3,4])
+
+tf2_l1_on  = input.bool(true, '0.5σ',      group=grp2, inline='tf2_1')
+tf2_l1_mul = input.float(0.5, '',           group=grp2, inline='tf2_1')
+tf2_l1_col = input.color(color.new(color.blue, 30),   '', group=grp2, inline='tf2_1')
+tf2_l1_sty = input.string('----', '',       group=grp2, inline='tf2_1', options=['⎯⎯⎯','----','····'])
+tf2_l1_wid = input.int(1, '',              group=grp2, inline='tf2_1', options=[1,2,3,4])
+
+tf2_l2_on  = input.bool(true, '1.0σ',      group=grp2, inline='tf2_2')
+tf2_l2_mul = input.float(1.0, '',           group=grp2, inline='tf2_2')
+tf2_l2_col = input.color(color.new(color.orange, 10), '', group=grp2, inline='tf2_2')
+tf2_l2_sty = input.string('----', '',       group=grp2, inline='tf2_2', options=['⎯⎯⎯','----','····'])
+tf2_l2_wid = input.int(2, '',              group=grp2, inline='tf2_2', options=[1,2,3,4])
+
+tf2_l3_on  = input.bool(true, '2.0σ',      group=grp2, inline='tf2_3')
+tf2_l3_mul = input.float(2.0, '',           group=grp2, inline='tf2_3')
+tf2_l3_col = input.color(color.new(color.red, 10),    '', group=grp2, inline='tf2_3')
+tf2_l3_sty = input.string('----', '',       group=grp2, inline='tf2_3', options=['⎯⎯⎯','----','····'])
+tf2_l3_wid = input.int(2, '',              group=grp2, inline='tf2_3', options=[1,2,3,4])
+
+// ── Timeframe 3 ───────────────────────────────────────────────────────────────
+grp3 = 'Timeframe 3 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+tf3_on  = input.bool(false, 'TF 3', group=grp3, inline='tf3')
+tf3     = input.timeframe('60', '',  group=grp3, inline='tf3')
+tf3_len = input.int(5, 'Period',     group=grp3, inline='tf3', minval=2)
+tf3_max = input.int(1, 'Show X back',group=grp3, inline='tf3', minval=1, maxval=20)
+tf3_mirror = input.bool(true, 'Mirror', group=grp3, inline='tf3')
+
+tf3_l0_on  = input.bool(true, 'Prev Close', group=grp3, inline='tf3_0')
+tf3_l0_col = input.color(color.gray,        '', group=grp3, inline='tf3_0')
+tf3_l0_sty = input.string('····', '',       group=grp3, inline='tf3_0', options=['⎯⎯⎯','----','····'])
+tf3_l0_wid = input.int(1, '',              group=grp3, inline='tf3_0', options=[1,2,3,4])
+
+tf3_l1_on  = input.bool(true, '0.5σ',      group=grp3, inline='tf3_1')
+tf3_l1_mul = input.float(0.5, '',           group=grp3, inline='tf3_1')
+tf3_l1_col = input.color(color.new(color.blue, 30),   '', group=grp3, inline='tf3_1')
+tf3_l1_sty = input.string('····', '',       group=grp3, inline='tf3_1', options=['⎯⎯⎯','----','····'])
+tf3_l1_wid = input.int(1, '',              group=grp3, inline='tf3_1', options=[1,2,3,4])
+
+tf3_l2_on  = input.bool(true, '1.0σ',      group=grp3, inline='tf3_2')
+tf3_l2_mul = input.float(1.0, '',           group=grp3, inline='tf3_2')
+tf3_l2_col = input.color(color.new(color.orange, 10), '', group=grp3, inline='tf3_2')
+tf3_l2_sty = input.string('····', '',       group=grp3, inline='tf3_2', options=['⎯⎯⎯','----','····'])
+tf3_l2_wid = input.int(2, '',              group=grp3, inline='tf3_2', options=[1,2,3,4])
+
+tf3_l3_on  = input.bool(true, '2.0σ',      group=grp3, inline='tf3_3')
+tf3_l3_mul = input.float(2.0, '',           group=grp3, inline='tf3_3')
+tf3_l3_col = input.color(color.new(color.red, 10),    '', group=grp3, inline='tf3_3')
+tf3_l3_sty = input.string('····', '',       group=grp3, inline='tf3_3', options=['⎯⎯⎯','----','····'])
+tf3_l3_wid = input.int(2, '',              group=grp3, inline='tf3_3', options=[1,2,3,4])
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+lineStyle(string s) =>
+    s == '----' ? line.style_dashed : s == '····' ? line.style_dotted : line.style_solid
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+type Level
+    float  price
+    color  col
+    string style
+    int    width
+    line   ln
+
+type Period
+    int          t_start
+    int          t_end
+    array<Level> levels
+
+// ── Build levels ──────────────────────────────────────────────────────────────
+buildLevels(float prev_close, float std, bool mirror, bool l0_on, color l0_col, string l0_sty, int l0_wid, bool l1_on, float l1_mul, color l1_col, string l1_sty, int l1_wid, bool l2_on, float l2_mul, color l2_col, string l2_sty, int l2_wid, bool l3_on, float l3_mul, color l3_col, string l3_sty, int l3_wid) =>
+    array<Level> lvls = array.new<Level>()
+    if l0_on
+        lvls.push(Level.new(prev_close, l0_col, l0_sty, l0_wid, na))
+    if l1_on
+        lvls.push(Level.new(prev_close + l1_mul * std, l1_col, l1_sty, l1_wid, na))
+        if mirror
+            lvls.push(Level.new(prev_close - l1_mul * std, l1_col, l1_sty, l1_wid, na))
+    if l2_on
+        lvls.push(Level.new(prev_close + l2_mul * std, l2_col, l2_sty, l2_wid, na))
+        if mirror
+            lvls.push(Level.new(prev_close - l2_mul * std, l2_col, l2_sty, l2_wid, na))
+    if l3_on
+        lvls.push(Level.new(prev_close + l3_mul * std, l3_col, l3_sty, l3_wid, na))
+        if mirror
+            lvls.push(Level.new(prev_close - l3_mul * std, l3_col, l3_sty, l3_wid, na))
+    lvls
+
+// ── Draw periods ──────────────────────────────────────────────────────────────
+drawPeriods(array<Period> periods, int max_show) =>
+    int periods_size = periods.size()
+    if periods_size > max_show
+        for i = max_show to periods_size - 1
+            if i < periods.size()
+                Period old = periods.get(i)
+                int lvls_size = old.levels.size()
+                for j = 0 to lvls_size - 1
+                    if j < old.levels.size()
+                        Level lv = old.levels.get(j)
+                        if not na(lv.ln)
+                            lv.ln.delete()
+        while periods.size() > max_show
+            periods.pop()
+    if periods.size() > 0
+        int cur_size = periods.size()
+        for i = 0 to cur_size - 1
+            if i < periods.size()
+                Period p = periods.get(i)
+                int end_t = p.t_end + (time - time[1])
+                int lvls_size = p.levels.size()
+                for j = 0 to lvls_size - 1
+                    if j < p.levels.size()
+                        Level lv = p.levels.get(j)
+                        color c = lv.col
+                        if na(lv.ln)
+                            lv.ln := line.new(p.t_start, lv.price, end_t, lv.price, color=c, style=lineStyle(lv.style), width=lv.width, xloc=xloc.bar_time)
+                        lv.ln.set_x1(p.t_start)
+                        lv.ln.set_x2(end_t)
+                        lv.ln.set_color(c)
+
+// ── Security data ─────────────────────────────────────────────────────────────
+// Only use regular session closes — ignore extended hours
+_reg_close = session.ismarket ? close : na
+
+// tf1_close  = yesterday's confirmed close (occurrence 1) → used for today's static levels
+// tf1_close_now = current forming bar's close (occurrence 0) → used for tomorrow's preview after 4PM
+// tf1_std uses occurrence 1 so std dev window is fully based on confirmed closes only
+tf1_close     = request.security(syminfo.tickerid, tf1, ta.valuewhen(not na(_reg_close), _reg_close, 1), lookahead=barmerge.lookahead_on)
+tf1_close_now = request.security(syminfo.tickerid, tf1, ta.valuewhen(not na(_reg_close), _reg_close, 0), lookahead=barmerge.lookahead_on)
+tf1_std       = request.security(syminfo.tickerid, tf1, ta.stdev(ta.valuewhen(not na(_reg_close), _reg_close, 1), tf1_len), lookahead=barmerge.lookahead_on)
+
+tf2_close     = request.security(syminfo.tickerid, tf2, ta.valuewhen(not na(_reg_close), _reg_close, 1), lookahead=barmerge.lookahead_on)
+tf2_close_now = request.security(syminfo.tickerid, tf2, ta.valuewhen(not na(_reg_close), _reg_close, 0), lookahead=barmerge.lookahead_on)
+tf2_std       = request.security(syminfo.tickerid, tf2, ta.stdev(ta.valuewhen(not na(_reg_close), _reg_close, 1), tf2_len), lookahead=barmerge.lookahead_on)
+
+tf3_close     = request.security(syminfo.tickerid, tf3, ta.valuewhen(not na(_reg_close), _reg_close, 1), lookahead=barmerge.lookahead_on)
+tf3_close_now = request.security(syminfo.tickerid, tf3, ta.valuewhen(not na(_reg_close), _reg_close, 0), lookahead=barmerge.lookahead_on)
+tf3_std       = request.security(syminfo.tickerid, tf3, ta.stdev(ta.valuewhen(not na(_reg_close), _reg_close, 1), tf3_len), lookahead=barmerge.lookahead_on)
+
+// ── State ─────────────────────────────────────────────────────────────────────
+var array<Period> periods1 = array.new<Period>()
+var array<Period> periods2 = array.new<Period>()
+var array<Period> periods3 = array.new<Period>()
+
+var array<Level> preview1 = array.new<Level>()
+var array<Level> preview2 = array.new<Level>()
+var array<Level> preview3 = array.new<Level>()
+
+// ── New period detection ───────────────────────────────────────────────────────
+_t1 = time(tf1, '0930-1600', 'America/New_York')
+_t2 = time(tf2, '0930-1600', 'America/New_York')
+_t3 = time(tf3, '0930-1600', 'America/New_York')
+newTF1 = not na(_t1) and (na(_t1[1]) or _t1 != _t1[1])
+newTF2 = not na(_t2) and (na(_t2[1]) or _t2 != _t2[1])
+newTF3 = not na(_t3) and (na(_t3[1]) or _t3 != _t3[1])
+
+// At new session start (9:30 AM), lock today's levels using yesterday's confirmed close + confirmed std
+if tf1_on
+    if newTF1
+        periods1.unshift(Period.new(time, time, buildLevels(tf1_close, tf1_std, tf1_mirror, tf1_l0_on, tf1_l0_col, tf1_l0_sty, tf1_l0_wid, tf1_l1_on, tf1_l1_mul, tf1_l1_col, tf1_l1_sty, tf1_l1_wid, tf1_l2_on, tf1_l2_mul, tf1_l2_col, tf1_l2_sty, tf1_l2_wid, tf1_l3_on, tf1_l3_mul, tf1_l3_col, tf1_l3_sty, tf1_l3_wid)))
+    if periods1.size() > 0 and not na(_t1)
+        Period cur = periods1.first()
+        cur.t_end := time
+
+if tf2_on
+    if newTF2
+        periods2.unshift(Period.new(time, time, buildLevels(tf2_close, tf2_std, tf2_mirror, tf2_l0_on, tf2_l0_col, tf2_l0_sty, tf2_l0_wid, tf2_l1_on, tf2_l1_mul, tf2_l1_col, tf2_l1_sty, tf2_l1_wid, tf2_l2_on, tf2_l2_mul, tf2_l2_col, tf2_l2_sty, tf2_l2_wid, tf2_l3_on, tf2_l3_mul, tf2_l3_col, tf2_l3_sty, tf2_l3_wid)))
+    if periods2.size() > 0 and not na(_t2)
+        Period cur = periods2.first()
+        cur.t_end := time
+
+if tf3_on
+    if newTF3
+        periods3.unshift(Period.new(time, time, buildLevels(tf3_close, tf3_std, tf3_mirror, tf3_l0_on, tf3_l0_col, tf3_l0_sty, tf3_l0_wid, tf3_l1_on, tf3_l1_mul, tf3_l1_col, tf3_l1_sty, tf3_l1_wid, tf3_l2_on, tf3_l2_mul, tf3_l2_col, tf3_l2_sty, tf3_l2_wid, tf3_l3_on, tf3_l3_mul, tf3_l3_col, tf3_l3_sty, tf3_l3_wid)))
+    if periods3.size() > 0 and not na(_t3)
+        Period cur = periods3.first()
+        cur.t_end := time
+
+// ── 4PM close snapshot ────────────────────────────────────────────────────────
+// Detect the exact 4PM bar (last bar of the regular session).
+// We capture the close at that moment and store it as the preview anchor.
+// This means tomorrow's levels are always static — fixed to today's 4PM close —
+// and never track live price during overnight / pre-market hours.
+// During market hours (9:30–4PM) no preview lines are shown at all.
+bool is4pmBar = not na(time(timeframe.period, '1555-1600', 'America/New_York'))
+bool isMarketHours = not na(time(timeframe.period, '0930-1600', 'America/New_York'))
+bool isAfterClose = not isMarketHours
+
+var float tf1_4pm_close = na
+var float tf2_4pm_close = na
+var float tf3_4pm_close = na
+
+if is4pmBar
+    tf1_4pm_close := tf1_close_now
+    tf2_4pm_close := tf2_close_now
+    tf3_4pm_close := tf3_close_now
+
+// Preview anchor: only valid after close, using the snapshotted 4PM close
+// During market hours preview anchor is na so no preview lines are drawn
+float tf1_preview_anchor = isAfterClose and not na(tf1_4pm_close) ? tf1_4pm_close : na
+float tf2_preview_anchor = isAfterClose and not na(tf2_4pm_close) ? tf2_4pm_close : na
+float tf3_preview_anchor = isAfterClose and not na(tf3_4pm_close) ? tf3_4pm_close : na
+
+// ── Draw preview helper ───────────────────────────────────────────────────────
+drawPreview(array<Level> prev, array<Level> new_lvls, int start_t, int end_t) =>
+    for lv in prev
+        if not na(lv.ln)
+            lv.ln.delete()
+    prev.clear()
+    for lv in new_lvls
+        prev.push(Level.new(lv.price, color.new(lv.col, 55), lv.style, lv.width, na))
+    for lv in prev
+        lv.ln := line.new(start_t, lv.price, end_t, lv.price, color=lv.col, style=lineStyle(lv.style), width=lv.width, xloc=xloc.bar_time)
+
+// ── Draw on last bar ──────────────────────────────────────────────────────────
+if barstate.islast
+    int bar_ms = time - time[1]
+
+    if tf1_on
+        drawPeriods(periods1, tf1_max)
+        if not na(tf1_preview_anchor)
+            drawPreview(preview1, buildLevels(tf1_preview_anchor, tf1_std, tf1_mirror, tf1_l0_on, tf1_l0_col, tf1_l0_sty, tf1_l0_wid, tf1_l1_on, tf1_l1_mul, tf1_l1_col, tf1_l1_sty, tf1_l1_wid, tf1_l2_on, tf1_l2_mul, tf1_l2_col, tf1_l2_sty, tf1_l2_wid, tf1_l3_on, tf1_l3_mul, tf1_l3_col, tf1_l3_sty, tf1_l3_wid), time + bar_ms, time + bar_ms * 390)
+        else
+            for lv in preview1
+                if not na(lv.ln)
+                    lv.ln.delete()
+            preview1.clear()
+    else
+        for lv in preview1
+            if not na(lv.ln)
+                lv.ln.delete()
+        preview1.clear()
+
+    if tf2_on
+        drawPeriods(periods2, tf2_max)
+        bool tf2_period_ending = tf2 == 'W' ? dayofweek == dayofweek.friday : tf2 == 'M' ? dayofmonth >= 28 : true
+        if not na(tf2_preview_anchor) and tf2_period_ending
+            drawPreview(preview2, buildLevels(tf2_preview_anchor, tf2_std, tf2_mirror, tf2_l0_on, tf2_l0_col, tf2_l0_sty, tf2_l0_wid, tf2_l1_on, tf2_l1_mul, tf2_l1_col, tf2_l1_sty, tf2_l1_wid, tf2_l2_on, tf2_l2_mul, tf2_l2_col, tf2_l2_sty, tf2_l2_wid, tf2_l3_on, tf2_l3_mul, tf2_l3_col, tf2_l3_sty, tf2_l3_wid), time + bar_ms, time + bar_ms * 390)
+        else
+            for lv in preview2
+                if not na(lv.ln)
+                    lv.ln.delete()
+            preview2.clear()
+    else
+        for lv in preview2
+            if not na(lv.ln)
+                lv.ln.delete()
+        preview2.clear()
+
+    if tf3_on
+        drawPeriods(periods3, tf3_max)
+        if not na(tf3_preview_anchor)
+            drawPreview(preview3, buildLevels(tf3_preview_anchor, tf3_std, tf3_mirror, tf3_l0_on, tf3_l0_col, tf3_l0_sty, tf3_l0_wid, tf3_l1_on, tf3_l1_mul, tf3_l1_col, tf3_l1_sty, tf3_l1_wid, tf3_l2_on, tf3_l2_mul, tf3_l2_col, tf3_l2_sty, tf3_l2_wid, tf3_l3_on, tf3_l3_mul, tf3_l3_col, tf3_l3_sty, tf3_l3_wid), time + bar_ms, time + bar_ms * 390)
+        else
+            for lv in preview3
+                if not na(lv.ln)
+                    lv.ln.delete()
+            preview3.clear()
+    else
+        for lv in preview3
+            if not na(lv.ln)
+                lv.ln.delete()
+        preview3.clear()

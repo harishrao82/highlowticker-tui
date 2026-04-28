@@ -1,0 +1,308 @@
+//This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@ unchained-fx
+//@version=5
+//
+indicator("NQSTATS", overlay=true, max_lines_count=500)
+
+//////////////////////////////////
+//
+//  Uses stats from nqstats.com from the ALN Session
+//  Created session boxes around the sessions as defined by nqstats.com
+//  Created a separate table for each potential option how Asia and London play out
+//  Added logic to display only the Statistics that align with how Asia and London played out that day
+//      Table is deleted at 6PM EST and recreated the next day at the start of the NY session. 
+//  Added Previous Day High/Low as dashed lines extending to 4PM EST
+//
+//////////////////////////////////
+
+// User inputs for table customization
+showSessionBoxes = input.bool(true, "Show Session boxes", group = "Session Boxes")
+asia_color = input.color(color.red, "Asia Color", group = "Session Boxes", inline = "2")
+london_color = input.color(color.blue, "London Color", group = "Session Boxes", inline = "2")
+newyork_color = input.color(color.green, "NY Color", group = "Session Boxes", inline = "2")
+borderwidth = input.int(2, "Box Border Width", options=[1,2,3], group = "Session Boxes")
+
+// Previous Day High/Low inputs
+showPrevDayHL = input.bool(true, "Show Previous Day High/Low", group = "Previous Day Levels")
+prevDayHighColor = input.color(color.orange, "Previous Day High Color", group = "Previous Day Levels")
+prevDayLowColor = input.color(color.purple, "Previous Day Low Color", group = "Previous Day Levels")
+prevDayLineWidth = input.int(1, "Line Width", minval=1, maxval=4, group = "Previous Day Levels")
+showPrevDayLabels = input.bool(true, "Show Labels", group = "Previous Day Levels")
+
+tablePosition = input.string("Top Right", "Table Position", options=["Top Left", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Right"], group = "Stats Table")
+tableTopBgColor = input.color(color.gray, "Table Top Row Background Color", group = "Stats Table")
+tableTopTextColor = input.color(color.white, "Table Top Row Text Color", group = "Stats Table")
+tableBodyBgColor = input.color(color.white, "Table Body Background Color", group = "Stats Table")
+tableBodyTextColor = input.color(color.black, "Table Body Text Color", group = "Stats Table")
+tableTextSize = input.string("Small", "Table Text Size", options=["Tiny", "Small", "Normal", "Large", "Huge"], group = "Stats Table")
+
+showSessionHighLow = input.bool(false, "Show Session Table of Highs/Lows", group = "Troubleshooting")
+ttablePosition = input.string("Middle Right", "Table Position", options=["Top Left", "Top Right", "Middle Left", "Middle Right", "Bottom Left", "Bottom Right"], group = "Troubleshooting")
+
+// Session times for Session Boxes.
+
+asia        = "2000-0200"
+london      = "0200-0800"
+newyork     = "0800-1600"
+na_color    = color.new(color.gray,100)
+
+// Convert position string to PineScript position enum
+getPosition(pos) =>
+    switch pos
+        "Top Left" => position.top_left
+        "Top Right" => position.top_right
+        "Middle Left" => position.middle_left
+        "Middle Right" => position.middle_right
+        "Bottom Left" => position.bottom_left
+        "Bottom Right" => position.bottom_right
+
+// Convert text size string to PineScript size enum
+getTextSize(size) =>
+    switch size
+        "Tiny" => size.tiny
+        "Small" => size.small
+        "Normal" => size.normal
+        "Large" => size.large
+        "Huge" => size.huge
+
+is_newbar(string sess) =>
+    t = time('D', sess, timezone = "America/New_York")
+    na(t[1]) and not na(t) or t[1] < t
+
+is_session(string sess) =>
+    not na(time('D', sess, timezone = "America/New_York"))
+
+range_box(string session = "2000-0000", color color = color.red, string bodies_wicks = "Wicks") =>
+    _high = bodies_wicks == "Wicks" ? high : math.max(open,close)
+    _low  = bodies_wicks == "Wicks" ? low  : math.min(open,close)
+    _range = _high - _low
+
+    var box s_box = na
+    if is_newbar(session)
+        s_box := box.new(bar_index, _high, bar_index, _low, border_color = color, bgcolor = na_color, border_width=borderwidth)
+    else if is_session(session)
+        if _high > box.get_top(s_box)
+            box.set_top(s_box, _high)
+        if _low < box.get_bottom(s_box)
+            box.set_bottom(s_box, _low)
+        box.set_right(s_box, bar_index)
+    
+    s_box
+
+/////////////////////////
+
+// Previous Day High/Low Logic
+var float prevDayHigh = na
+var float prevDayLow = na
+var float currentDayHigh = na
+var float currentDayLow = na
+var int prevDayStartBar = na
+var int currentDayStartBar = na
+var line prevHighLine = na
+var line prevLowLine = na
+var label prevHighLabel = na
+var label prevLowLabel = na
+
+// Define trading day as 6PM to 6PM EST (to align with futures trading day)
+tradingDayStart = time(timeframe.period, "1800-1801", "America/New_York")
+inTradingDay = time(timeframe.period, "1800-1759", "America/New_York")
+nyClose = time(timeframe.period, "1600-1601", "America/New_York")
+
+// Detect new trading day (at 6PM EST)
+newTradingDay = not na(tradingDayStart) and na(tradingDayStart[1])
+
+if newTradingDay
+    // Store previous day's high/low
+    prevDayHigh := currentDayHigh
+    prevDayLow := currentDayLow
+    prevDayStartBar := currentDayStartBar
+    // Reset current day tracking
+    currentDayHigh := high
+    currentDayLow := low
+    currentDayStartBar := bar_index
+
+// Update current day high/low
+if not na(inTradingDay)
+    currentDayHigh := math.max(high, nz(currentDayHigh, high))
+    currentDayLow := math.min(low, nz(currentDayLow, low))
+    if na(currentDayStartBar)
+        currentDayStartBar := bar_index
+
+// Draw Previous Day High/Low lines
+if showPrevDayHL and not na(prevDayHigh) and not na(prevDayLow)
+    // Delete old lines and labels
+    if not na(prevHighLine)
+        line.delete(prevHighLine)
+    if not na(prevLowLine)
+        line.delete(prevLowLine)
+    if not na(prevHighLabel)
+        label.delete(prevHighLabel)
+    if not na(prevLowLabel)
+        label.delete(prevLowLabel)
+    
+    // Calculate end bar (extend to current bar or 4PM whichever is applicable)
+    endBar = bar_index + 1
+    
+    // Draw new lines from start of current trading day to now
+    prevHighLine := line.new(currentDayStartBar, prevDayHigh, endBar, prevDayHigh, 
+         color=prevDayHighColor, width=prevDayLineWidth, style=line.style_dashed, extend=extend.none)
+    prevLowLine := line.new(currentDayStartBar, prevDayLow, endBar, prevDayLow, 
+         color=prevDayLowColor, width=prevDayLineWidth, style=line.style_dashed, extend=extend.none)
+    
+    // Add labels
+    if showPrevDayLabels
+        prevHighLabel := label.new(endBar, prevDayHigh, "PDH " + str.tostring(prevDayHigh, "#.##"), 
+             style=label.style_label_left, color=color.new(prevDayHighColor, 80), textcolor=prevDayHighColor, size=size.small)
+        prevLowLabel := label.new(endBar, prevDayLow, "PDL " + str.tostring(prevDayLow, "#.##"), 
+             style=label.style_label_left, color=color.new(prevDayLowColor, 80), textcolor=prevDayLowColor, size=size.small)
+
+/////////////////////////
+
+
+// Session definitions (America/New York time)
+inAsia = time(timeframe.period, "2000-0200", "America/New_York")
+inLondon = time(timeframe.period, "0200-0800", "America/New_York")
+inNY = time(timeframe.period, "0800-1400", "America/New_York")
+
+
+// Session tracking variables
+var float asiaHigh = na
+var float asiaLow = na
+var float londonHigh = na
+var float londonLow = na
+var float nyHigh = na
+var float nyLow = na
+var float asiaHighFinal = na
+var float asiaLowFinal = na
+var float londonHighFinal = na
+var float londonLowFinal = na
+var float nyHighFinal = na
+var float nyLowFinal = na
+var table currentTable = na
+var table ttable = na
+
+// New day detection and Asia reset
+newDay = dayofmonth != dayofmonth[1]
+resetAsia = hour(time) == 18 and minute(time) == 0  // Reset at 18:00 EST
+
+// Session data collection
+if newDay
+    londonHigh := na
+    londonLow := na
+    nyHigh := na
+    nyLow := na
+    asiaHighFinal := na
+    asiaLowFinal := na
+    londonHighFinal := na
+    londonLowFinal := na
+    nyHighFinal := na
+    nyLowFinal := na
+    if not na(currentTable)
+        table.delete(currentTable)
+        currentTable := na
+
+if resetAsia
+    asiaHigh := na
+    asiaLow := na
+
+if inAsia
+    asiaHigh := math.max(high, nz(asiaHigh, low))
+    asiaLow := math.min(low, nz(asiaLow, high))
+    if hour(time) == 1 and minute(time) == 59 and inAsia  // Last bar of Asia (01:59)
+        asiaHighFinal := asiaHigh
+        asiaLowFinal := asiaLow
+
+if inLondon
+    londonHigh := math.max(high, nz(londonHigh, low))
+    londonLow := math.min(low, nz(londonLow, high))
+    if hour(time) == 7 and minute(time) == 59 and inLondon  // Last bar of London (07:59)
+        londonHighFinal := londonHigh
+        londonLowFinal := londonLow
+
+if inNY
+    nyHigh := math.max(high, nz(nyHigh, low))
+    nyLow := math.min(low, nz(nyLow, high))
+    if hour(time) == 13 and minute(time) == 59 and inNY  // Last bar of NY (13:59)
+        nyHighFinal := nyHigh
+        nyLowFinal := nyLow
+    
+    // Condition checks and table display during NY session
+    if not na(asiaHigh) and not na(londonHigh)
+        // Clear existing table
+        if not na(currentTable)
+            table.delete(currentTable)
+            currentTable := na
+        
+        // Condition 1: London goes above and below Asia
+        if londonHigh > asiaHigh and londonLow < asiaLow
+            currentTable := table.new(getPosition(tablePosition), 3, 6, bgcolor=tableBodyBgColor, frame_width = 1, frame_color = color.black, border_width = 1, border_color = color.black)
+            table.cell(currentTable, 0, 0, "London Engulfs Asia\n(Pattern 1)", text_size=getTextSize(tableTextSize), bgcolor=tableTopBgColor, text_color=tableTopTextColor)
+            table.merge_cells(currentTable, 0, 0, 1, 0)
+            table.cell(currentTable, 0, 1, "NY Takes London\nHigh or Low", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 1, "98%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 2, "NY Engulfs London", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 2, "43%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+
+
+        // Condition 2: London stays within Asia
+        else if londonHigh <= asiaHigh and londonLow >= asiaLow
+            currentTable := table.new(getPosition(tablePosition), 3, 8, bgcolor=tableBodyBgColor, frame_width = 1, frame_color = color.black, border_width = 1, border_color = color.black)
+            table.cell(currentTable, 0, 0, "London Within Asia\n(Pattern 2)", text_size=getTextSize(tableTextSize), bgcolor=tableTopBgColor, text_color=tableTopTextColor)
+            table.merge_cells(currentTable, 0, 0, 1, 0)
+            table.cell(currentTable, 0, 1, "Occurrences (10y)", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 1, "168", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 2, "NY Takes London High/Low", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 2, "95%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 3, "NY Takes Asia High/Low", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 3, "91%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 4, "NY Engulfs Overnight", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 4, "39%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+
+
+        // Condition 3: London high above Asia high, low not below Asia low
+        else if londonHigh > asiaHigh and londonLow >= asiaLow
+            currentTable := table.new(getPosition(tablePosition), 3, 9, bgcolor=tableBodyBgColor, frame_width = 1, frame_color = color.black, border_width = 1, border_color = color.black)
+            table.cell(currentTable, 0, 0, "London Above Asia High\n(Pattern 3)", text_size=getTextSize(tableTextSize), bgcolor=tableTopBgColor, text_color=tableTopTextColor)
+            table.merge_cells(currentTable, 0, 0, 1, 0)
+         //   table.cell(currentTable, 0, 1, "Occurrences (10y)", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+         //   table.cell(currentTable, 1, 1, "983", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 2, "NY Takes London High", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 2, "79%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 3, "NY Takes London Low", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 3, "63%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 4, "NY Takes Asia Low", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 4, "51%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 5, "NY Engulfs Overnight", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 5, "35%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+    
+
+        // Condition 4: London low below Asia low, high not above Asia high
+        else if londonLow < asiaLow and londonHigh <= asiaHigh
+            currentTable := table.new(getPosition(tablePosition), 3, 9, bgcolor=tableBodyBgColor, frame_width = 1, frame_color = color.black, border_width = 1, border_color = color.black)
+            table.cell(currentTable, 0, 0, "London Below Asia Low\n(Pattern 4)", text_size=getTextSize(tableTextSize), bgcolor=tableTopBgColor, text_color=tableTopTextColor)
+            table.merge_cells(currentTable, 0, 0, 1, 0)
+        //    table.cell(currentTable, 0, 1, "Occurrences (10y)", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+        //    table.cell(currentTable, 1, 1, "983", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 2, "NY Takes London Low", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 2, "73%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 3, "NY Takes London High", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 3, "66%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 4, "NY Takes Asia High", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 4, "54%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 0, 5, "NY Engulfs Overnight", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(currentTable, 1, 5, "33%", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+  
+
+        if showSessionHighLow
+            ttable := table.new(getPosition(ttablePosition), 3, 3, bgcolor=tableBodyBgColor, frame_width = 1, frame_color = color.black, border_width = 1, border_color = color.black)
+            table.cell(ttable, 0, 0, "Session Highs/Lows", text_size=getTextSize(tableTextSize), bgcolor=tableTopBgColor, text_color=tableTopTextColor)
+            table.merge_cells(ttable, 0, 0, 1, 0)
+            table.cell(ttable, 0, 1, "Asia H/L", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(ttable, 1, 1, str.tostring(asiaHigh, "#.##") + "/" + str.tostring(asiaLow, "#.##"), text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(ttable, 0, 2, "London H/L", text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+            table.cell(ttable, 1, 2, str.tostring(londonHigh, "#.##") + "/" + str.tostring(londonLow, "#.##"), text_size=getTextSize(tableTextSize), bgcolor=tableBodyBgColor, text_color=tableBodyTextColor)
+
+if showSessionBoxes
+    range_box(asia, asia_color, "Wicks")
+    range_box(london, london_color, "Wicks")
+    range_box(newyork, newyork_color, "Wicks")
