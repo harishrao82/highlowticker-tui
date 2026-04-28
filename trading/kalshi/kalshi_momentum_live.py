@@ -44,6 +44,14 @@ _TRADING = _P(__file__).resolve().parent.parent
 for _d in ('analysis', 'recorders'):
     _sys.path.insert(0, str(_TRADING / _d))
 
+# Force line-buffered stdout so async console.print calls don't interleave
+# partial writes when redirected to a log file (no TTY).
+try:
+    _sys.stdout.reconfigure(line_buffering=True)
+    _sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 import btc_vol_profile
 
 load_dotenv()
