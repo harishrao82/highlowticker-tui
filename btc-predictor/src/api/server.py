@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -396,6 +397,16 @@ class AppState:
         # diluting on stale history. See follow-strategy comparison notes.
         self.AUTOTUNE_AFTER_N_WINDOWS = 5
         self.AUTOTUNE_WINDOW_LOOKBACK = 5
+        # /optimal_settings cache: key is n_windows (int), value is
+        # {"window_open_ts": last_completed_ts, "payload": <full dict>}.
+        # Invalidated by setting window_open_ts to None on every window roll;
+        # next request recomputes in a worker thread.
+        self.optimal_cache: dict[int, dict] = {}
+        # Backpressure counters — bump from the WS consumers / broadcaster,
+        # surface via /health so we can see if the event loop is stalling.
+        self.ws_recv_gaps_over_1s = 0
+        self.broadcast_timeouts = 0
+        self.last_coinbase_recv_ns: int | None = None
 
 
 STATE = AppState()
@@ -415,6 +426,19 @@ async def coinbase_consumer():
                 log.info("Subscribed to market_trades for %s", PRODUCT_ID)
                 delay = 1.0
                 async for raw in ws:
+                    # Backpressure detector: if more than 1 s elapsed between
+                    # successive WS receives, the event loop was probably
+                    # blocked (sync I/O, heavy compute). Count and log so we
+                    # know how often it happens.
+                    now_ns = time.time_ns()
+                    prev_ns = STATE.last_coinbase_recv_ns
+                    STATE.last_coinbase_recv_ns = now_ns
+                    if prev_ns is not None:
+                        gap_ms = (now_ns - prev_ns) / 1e6
+                        if gap_ms > 1000:
+                            STATE.ws_recv_gaps_over_1s += 1
+                            log.warning("Coinbase WS recv gap %.0f ms (total %d)",
+                                        gap_ms, STATE.ws_recv_gaps_over_1s)
                     try:
                         msg = json.loads(raw)
                     except json.JSONDecodeError:
@@ -534,6 +558,9 @@ async def prediction_publisher():
             try:
                 await asyncio.wait_for(ws.send_json(pred), timeout=0.4)
                 return None
+            except asyncio.TimeoutError:
+                STATE.broadcast_timeouts += 1
+                return ws
             except Exception:
                 return ws
 
@@ -545,8 +572,8 @@ async def prediction_publisher():
             dead = {ws for ws in results if ws is not None}
             if dead:
                 STATE.subscribers -= dead
-                log.info("Dropped %d slow/dead subscriber(s) — %d remain",
-                         len(dead), len(STATE.subscribers))
+                log.info("Dropped %d slow/dead subscriber(s) — %d remain (total broadcast_timeouts=%d)",
+                         len(dead), len(STATE.subscribers), STATE.broadcast_timeouts)
 
 
 @asynccontextmanager
@@ -980,6 +1007,8 @@ async def on_window_settled(window_ts: float):
     STATE.window_pnl_log.append(entry)
     if len(STATE.window_pnl_log) > 100:
         STATE.window_pnl_log = STATE.window_pnl_log[-100:]
+    # New window settled → /optimal_settings cache is stale.
+    STATE.optimal_cache.clear()
     # Persist to disk — survives restart, source of truth for the auto-tuner
     # and the dashboard's settlement-history table.
     _append_jsonl(WINDOW_PNL_LOG_PATH, entry)
@@ -1042,11 +1071,7 @@ async def arb_window_endpoint():
     return STATE.arb_tracker.as_payload()
 
 
-@app.get("/arb_trades")
-async def arb_trades_endpoint(limit: int = 200):
-    """Historical settled-arb-trade ledger from disk. Each line of
-    arb_trades.jsonl is one trade with its final outcome and P&L.
-    """
+def _read_arb_trades_sync(limit: int) -> dict:
     if not ARB_TRADES_LOG_PATH.exists():
         return {"entries": [], "log_path": str(ARB_TRADES_LOG_PATH)}
     rows: list[dict] = []
@@ -1062,14 +1087,18 @@ async def arb_trades_endpoint(limit: int = 200):
             "log_path": str(ARB_TRADES_LOG_PATH)}
 
 
-@app.get("/optimal_settings")
-async def optimal_settings(n_windows: int = 1):
-    """Parameter sweep over the last N completed 15-min windows.
+@app.get("/arb_trades")
+async def arb_trades_endpoint(limit: int = 200):
+    """Historical settled-arb-trade ledger from disk. Each line of
+    arb_trades.jsonl is one trade with its final outcome and P&L.
 
-    Returns the (K_yes, K_no, Δ_yes, Δ_no) combination that would have
-    maximised hold-to-close P&L per share, together with how the current
-    live setting (0.45 / 0.45 / 0.12 / 0.12) ranks against it.
+    Runs the disk read in a worker thread so the event loop keeps draining
+    the Coinbase/Kalshi WS sockets while we read.
     """
+    return await asyncio.to_thread(_read_arb_trades_sync, limit)
+
+
+def _compute_optimal_settings_sync(n_windows: int) -> dict:
     from collections import defaultdict
     if not PREDICTION_LOG_PATH.exists():
         return {"error": "no prediction log yet"}
@@ -1179,20 +1208,40 @@ async def optimal_settings(n_windows: int = 1):
     }
 
 
-@app.get("/prediction_history")
-async def prediction_history(hours: float = 6):
-    """Recent slice of the persistent prediction log, for trend analysis.
+@app.get("/optimal_settings")
+async def optimal_settings(n_windows: int = 1):
+    """Parameter sweep over the last N completed 15-min windows.
 
-    Returns rows as dicts; client can chart model P vs Kalshi mid over
-    hours / days. The log is JSONL on disk — easy to grep / pandas-read.
+    Returns the (K_yes, K_no, Δ_yes, Δ_no) combination that would have
+    maximised hold-to-close P&L per share, together with how the current
+    live setting (0.45 / 0.45 / 0.12 / 0.12) ranks against it.
+
+    Cached: the result only changes when a new window settles, so we serve
+    from STATE.optimal_cache and only re-scan + grid-search on cache miss.
+    Cache miss runs in a worker thread to keep the event loop responsive.
     """
+    n = max(1, n_windows)
+    last_settled_ts = (STATE.window_pnl_log[-1]["window_open_ts"]
+                       if STATE.window_pnl_log else None)
+    cached = STATE.optimal_cache.get(n)
+    if cached and cached.get("window_open_ts") == last_settled_ts:
+        return cached["payload"]
+    payload = await asyncio.to_thread(_compute_optimal_settings_sync, n)
+    # Only cache successful results — error payloads should retry next call.
+    if "error" not in payload:
+        STATE.optimal_cache[n] = {
+            "window_open_ts": last_settled_ts,
+            "payload": payload,
+        }
+    return payload
+
+
+def _read_prediction_history_sync(hours: float) -> dict:
     if not PREDICTION_LOG_PATH.exists():
         return {"rows": [], "log_path": str(PREDICTION_LOG_PATH)}
     import time as _t
     cutoff = _t.time() - max(0.0, hours) * 3600.0
     rows: list[dict] = []
-    # Tail-scan: read the file from the end and stop when we hit the cutoff.
-    # Simple line-by-line scan is fine for ~17 MB/day worth of log.
     try:
         with open(PREDICTION_LOG_PATH, encoding="utf-8") as f:
             for line in f:
@@ -1205,6 +1254,18 @@ async def prediction_history(hours: float = 6):
     except OSError as e:
         return {"error": str(e), "rows": []}
     return {"rows": rows, "log_path": str(PREDICTION_LOG_PATH)}
+
+
+@app.get("/prediction_history")
+async def prediction_history(hours: float = 6):
+    """Recent slice of the persistent prediction log, for trend analysis.
+
+    Returns rows as dicts; client can chart model P vs Kalshi mid over
+    hours / days. The log is JSONL on disk — easy to grep / pandas-read.
+
+    Runs the scan in a worker thread (the log can be ~17 MB/day).
+    """
+    return await asyncio.to_thread(_read_prediction_history_sync, hours)
 
 
 @app.get("/btc_candles")
@@ -1277,6 +1338,9 @@ async def model_info():
 
 @app.get("/health")
 async def health():
+    now_ns = time.time_ns()
+    last_recv = STATE.last_coinbase_recv_ns
+    coinbase_recv_age_ms = (now_ns - last_recv) / 1e6 if last_recv else None
     return {
         "status": "ok",
         "model_loaded": STATE.model is not None,
@@ -1285,6 +1349,12 @@ async def health():
         "subscribers": len(STATE.subscribers),
         "last_trade_ts_ns": STATE.last_trade_ts_ns,
         "latest_prediction": STATE.latest_prediction,
+        "backpressure": {
+            "ws_recv_gaps_over_1s":  STATE.ws_recv_gaps_over_1s,
+            "broadcast_timeouts":    STATE.broadcast_timeouts,
+            "coinbase_recv_age_ms":  round(coinbase_recv_age_ms, 1) if coinbase_recv_age_ms else None,
+            "optimal_cache_size":    len(STATE.optimal_cache),
+        },
     }
 
 
