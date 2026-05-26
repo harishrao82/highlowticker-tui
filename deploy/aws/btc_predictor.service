@@ -1,0 +1,48 @@
+[Unit]
+Description=BTC 15-min predictor + n-5 arb executor (FastAPI)
+Documentation=file:///home/__USER__/highlowticker-tui/btc-predictor/HANDOFF.md
+Documentation=file:///home/__USER__/highlowticker-tui/deploy/aws/BTC_PREDICTOR_MIGRATION.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PRED_DIR__
+
+# Environment:
+#   LIVE_TRADING        — set to "1" to enable real Kalshi orders.
+#                         DEFAULT: NOT SET (paper mode).
+#                         Override via `sudo systemctl edit btc_predictor`
+#                         after paper-mode smoke test passes.
+#   PYTHONUNBUFFERED    — force line-buffered stdout so journalctl tails
+#                         show output as it's emitted, not at flush time.
+#   BTC_PRED_KILL_SWITCH — path of the file the executor checks before each
+#                         order. Touching the file blocks all new orders.
+Environment="PYTHONUNBUFFERED=1"
+Environment="BTC_PRED_KILL_SWITCH=/tmp/btc_predictor_stop"
+
+ExecStart=__PRED_DIR__/.venv/bin/python __PRED_DIR__/scripts/run_live.py
+
+# Restart on crash, but back off so a tight crash-loop doesn't burn CPU.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Log via journal (journalctl -u btc_predictor -f to follow).
+StandardOutput=journal
+StandardError=journal
+
+# Memory + file-descriptor safety nets.
+LimitNOFILE=65536
+MemoryMax=3G
+
+# Stop semantics: send SIGTERM, wait 30s for graceful shutdown.
+# The executor will not place any new orders during shutdown; any in-flight
+# orders will resolve via Kalshi's TTL.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

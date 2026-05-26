@@ -1,0 +1,40 @@
+[Unit]
+Description=Cloudflare tunnel for the BTC predictor dashboard (ephemeral trycloudflare.com URL)
+Documentation=file:///home/__USER__/highlowticker-tui/deploy/aws/BTC_PREDICTOR_MIGRATION.md
+# Wait for the dashboard server to come up so the tunnel doesn't error
+# out on connection-refused when the FastAPI is mid-rehydrate.
+After=network-online.target btc_predictor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+
+# Ephemeral mode — no Cloudflare account needed. Prints a fresh
+# https://<random>.trycloudflare.com URL each restart; find it via:
+#   journalctl -u btc_predictor_tunnel | grep trycloudflare.com
+#
+# For a stable URL backed by your Cloudflare account, see the
+# "Upgrading to a stable, branded URL" appendix in
+# BTC_PREDICTOR_MIGRATION.md and use:
+#   ExecStart=/usr/local/bin/cloudflared tunnel run btc-predictor
+ExecStart=/usr/local/bin/cloudflared tunnel --url http://localhost:8000 \
+                                            --metrics localhost:2000 \
+                                            --no-autoupdate
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+StandardOutput=journal
+StandardError=journal
+
+# cloudflared can stay small; cap to avoid runaway memory if it ever leaks.
+MemoryMax=256M
+
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

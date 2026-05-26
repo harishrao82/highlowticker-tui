@@ -1,0 +1,230 @@
+{
+  "rows": 120960,
+  "windows": 8640,
+  "date_range": [
+    "2026-02-21 00:00:00+00:00",
+    "2026-05-21 23:45:00+00:00"
+  ],
+  "split": {
+    "train_candles": 6048,
+    "val_candles": 1296,
+    "test_candles": 1296,
+    "train_rows": 84672,
+    "val_rows": 18144,
+    "test_rows": 18144
+  },
+  "best_iteration": 224,
+  "half_life_days": 90.0,
+  "n_features": 29,
+  "feature_names": [
+    "body_pct",
+    "time_fraction",
+    "body_time_product",
+    "running_range_pct",
+    "price_position_in_range",
+    "upper_wick_pct",
+    "lower_wick_pct",
+    "volume_pace",
+    "flow_imbalance_30s",
+    "flow_imbalance_60s",
+    "flow_imbalance_300s",
+    "trade_rate_ratio",
+    "consecutive_1min_run",
+    "green_ratio",
+    "avg_1min_body",
+    "session_bucket",
+    "day_of_week",
+    "is_weekend",
+    "prior_direction",
+    "prior_body_pct",
+    "prior_range_pct",
+    "flow_short_long_alignment",
+    "flow_momentum",
+    "body_acceleration",
+    "wick_asymmetry",
+    "range_consumed_ratio",
+    "late_candle_flag",
+    "early_candle_flag",
+    "sample_sec"
+  ],
+  "metrics": {
+    "accuracy": 0.7568342151675485,
+    "auc": 0.847987248276601,
+    "brier": 0.15989607750046225,
+    "by_sample_sec": [
+      {
+        "sample_sec": 60,
+        "accuracy": 0.5856481481481481,
+        "mean_prob": 0.5093662327227914,
+        "n": 1296
+      },
+      {
+        "sample_sec": 120,
+        "accuracy": 0.6365740740740741,
+        "mean_prob": 0.5021762912634972,
+        "n": 1296
+      },
+      {
+        "sample_sec": 180,
+        "accuracy": 0.6604938271604939,
+        "mean_prob": 0.5002595006192259,
+        "n": 1296
+      },
+      {
+        "sample_sec": 240,
+        "accuracy": 0.6813271604938271,
+        "mean_prob": 0.504720015860135,
+        "n": 1296
+      },
+      {
+        "sample_sec": 300,
+        "accuracy": 0.6990740740740741,
+        "mean_prob": 0.50301177887028,
+        "n": 1296
+      },
+      {
+        "sample_sec": 360,
+        "accuracy": 0.7253086419753086,
+        "mean_prob": 0.5049297270488282,
+        "n": 1296
+      },
+      {
+        "sample_sec": 420,
+        "accuracy": 0.75,
+        "mean_prob": 0.5039539054960033,
+        "n": 1296
+      },
+      {
+        "sample_sec": 480,
+        "accuracy": 0.7723765432098766,
+        "mean_prob": 0.5035795824638816,
+        "n": 1296
+      },
+      {
+        "sample_sec": 540,
+        "accuracy": 0.7932098765432098,
+        "mean_prob": 0.5022677564221131,
+        "n": 1296
+      },
+      {
+        "sample_sec": 600,
+        "accuracy": 0.8125,
+        "mean_prob": 0.5072567860782561,
+        "n": 1296
+      },
+      {
+        "sample_sec": 660,
+        "accuracy": 0.8302469135802469,
+        "mean_prob": 0.5072730115609654,
+        "n": 1296
+      },
+      {
+        "sample_sec": 720,
+        "accuracy": 0.8557098765432098,
+        "mean_prob": 0.5022219746108886,
+        "n": 1296
+      },
+      {
+        "sample_sec": 780,
+        "accuracy": 0.8811728395061729,
+        "mean_prob": 0.4987615955679305,
+        "n": 1296
+      },
+      {
+        "sample_sec": 840,
+        "accuracy": 0.9120370370370371,
+        "mean_prob": 0.49454749819751453,
+        "n": 1296
+      }
+    ],
+    "by_session": [
+      {
+        "session": 0,
+        "name": "Dead",
+        "accuracy": 0.7606292517006803,
+        "n": 2352
+      },
+      {
+        "session": 1,
+        "name": "Asia",
+        "accuracy": 0.7565247252747253,
+        "n": 5824
+      },
+      {
+        "session": 2,
+        "name": "London",
+        "accuracy": 0.7705627705627706,
+        "n": 3696
+      },
+      {
+        "session": 3,
+        "name": "US",
+        "accuracy": 0.7551020408163265,
+        "n": 3136
+      },
+      {
+        "session": 4,
+        "name": "USPM",
+        "accuracy": 0.7401147959183674,
+        "n": 3136
+      }
+    ],
+    "high_confidence": [
+      {
+        "threshold": 0.55,
+        "accuracy": 0.78990959094645,
+        "coverage": 0.8717482363315696,
+        "n": 15817
+      },
+      {
+        "threshold": 0.6,
+        "accuracy": 0.8232105732105732,
+        "coverage": 0.7422839506172839,
+        "n": 13468
+      },
+      {
+        "threshold": 0.65,
+        "accuracy": 0.8568660266008984,
+        "coverage": 0.6257164902998237,
+        "n": 11353
+      },
+      {
+        "threshold": 0.7,
+        "accuracy": 0.8873268988669744,
+        "coverage": 0.525352733686067,
+        "n": 9532
+      }
+    ],
+    "feature_importance": {
+      "body_pct": 341045.75236701965,
+      "body_time_product": 336573.1540956497,
+      "body_acceleration": 63532.28670883179,
+      "prior_range_pct": 57128.92176818848,
+      "prior_body_pct": 50077.58205413818,
+      "upper_wick_pct": 19714.956735610962,
+      "running_range_pct": 15590.303029060364,
+      "volume_pace": 14985.092770576477,
+      "avg_1min_body": 14950.491075515747,
+      "lower_wick_pct": 14277.08343219757,
+      "time_fraction": 11947.509119033813,
+      "day_of_week": 11563.757972717285,
+      "session_bucket": 8532.555131912231,
+      "flow_imbalance_300s": 5632.465277671814,
+      "wick_asymmetry": 5235.98966217041,
+      "range_consumed_ratio": 5087.580253601074,
+      "trade_rate_ratio": 4315.445343971252,
+      "green_ratio": 3622.7379179000854,
+      "price_position_in_range": 3392.8440837860107,
+      "is_weekend": 2653.585391998291,
+      "sample_sec": 1867.142827987671,
+      "late_candle_flag": 1004.7344989776611,
+      "flow_imbalance_30s": 677.7146987915039,
+      "prior_direction": 677.3738594055176,
+      "flow_momentum": 630.9071989059448,
+      "flow_imbalance_60s": 557.476487159729,
+      "consecutive_1min_run": 154.1903018951416,
+      "flow_short_long_alignment": 0.0,
+      "early_candle_flag": 0.0
+    }
+  }
+}
