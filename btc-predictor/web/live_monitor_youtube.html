@@ -842,7 +842,7 @@ function flashSignal(trade) {
                + `<div class="sub">entry $${Number(trade.entry_ask).toFixed(3)} · T+${trade.sample_sec}s</div>`;
   clearTimeout(_flashTimer);
   _flashTimer = setTimeout(() => { el.className = ""; }, 1400);
-  audio.fire();
+  if (isUp) audio.fireUp(); else audio.fireDown();
 }
 
 // ─── Header session stats (refreshed from arb_window per tick + window log periodic) ──
@@ -968,10 +968,19 @@ const audio = {
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.start(t0); osc.stop(t0 + dur + 0.05);
   },
-  // Bright two-note "blip-bloop" when a new trade appears.
-  fire() {
-    this.tone({ freq: 660, dur: 0.10, type: "triangle", vol: 0.22 });
-    this.tone({ freq: 990, dur: 0.12, type: "triangle", vol: 0.18, start: 0.06 });
+  // BUY UP fire — bright rising triangle-wave blip-bloop. Two ascending
+  // tones with a third sparkle on top.
+  fireUp() {
+    this.tone({ freq: 660,  dur: 0.10, type: "triangle", vol: 0.22 });
+    this.tone({ freq: 990,  dur: 0.12, type: "triangle", vol: 0.20, start: 0.06 });
+    this.tone({ freq: 1320, dur: 0.10, type: "sine",     vol: 0.10, start: 0.14 });
+  },
+  // BUY DOWN fire — thicker, descending square-wave drop. Lower-pitched
+  // so it reads as the bearish counterpart to fireUp.
+  fireDown() {
+    this.tone({ freq: 520, dur: 0.10, type: "square", vol: 0.18 });
+    this.tone({ freq: 330, dur: 0.14, type: "square", vol: 0.16, start: 0.06,
+                glideTo: 247 });
   },
   // Rising C-major arpeggio + sustained high bell — the "cha-ching".
   win() {
