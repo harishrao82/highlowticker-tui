@@ -958,7 +958,13 @@ const audio = {
   },
   // Single oscillator with a fast attack + exponential decay envelope.
   tone({ freq, dur=0.15, type="sine", vol=0.25, attack=0.005, start=0, glideTo=null }) {
-    if (!this.ctx || !this.enabled || this.ctx.state !== "running") return;
+    if (!this.ctx || !this.enabled) return;
+    // Some browsers (Safari, some Chrome builds) keep the AudioContext
+    // suspended past the initial user gesture if it sat idle. Resume
+    // defensively each fire so SFX work even after long quiet periods.
+    if (this.ctx.state === "suspended") {
+      try { this.ctx.resume(); } catch {}
+    }
     const t0 = this.ctx.currentTime + start;
     const osc = this.ctx.createOscillator();
     const g   = this.ctx.createGain();
@@ -971,32 +977,30 @@ const audio = {
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.start(t0); osc.stop(t0 + dur + 0.05);
   },
-  // BUY UP fire — bright rising triangle-wave blip-bloop. Two ascending
-  // tones with a third sparkle on top.
+  // BUY UP fire — bright rising triangle-wave blip-bloop. Louder than
+  // music layer so it cuts through clearly.
   fireUp() {
-    this.tone({ freq: 660,  dur: 0.10, type: "triangle", vol: 0.22 });
-    this.tone({ freq: 990,  dur: 0.12, type: "triangle", vol: 0.20, start: 0.06 });
-    this.tone({ freq: 1320, dur: 0.10, type: "sine",     vol: 0.10, start: 0.14 });
+    this.tone({ freq: 660,  dur: 0.11, type: "triangle", vol: 0.45 });
+    this.tone({ freq: 990,  dur: 0.13, type: "triangle", vol: 0.40, start: 0.07 });
+    this.tone({ freq: 1320, dur: 0.10, type: "sine",     vol: 0.20, start: 0.14 });
   },
-  // BUY DOWN fire — thicker, descending square-wave drop. Lower-pitched
-  // so it reads as the bearish counterpart to fireUp.
+  // BUY DOWN fire — thicker, descending square-wave drop.
   fireDown() {
-    this.tone({ freq: 520, dur: 0.10, type: "square", vol: 0.18 });
-    this.tone({ freq: 330, dur: 0.14, type: "square", vol: 0.16, start: 0.06,
+    this.tone({ freq: 520, dur: 0.11, type: "square", vol: 0.38 });
+    this.tone({ freq: 330, dur: 0.18, type: "square", vol: 0.34, start: 0.07,
                 glideTo: 247 });
   },
   // Rising C-major arpeggio + sustained high bell — the "cha-ching".
   win() {
     [523, 659, 784, 1047].forEach((f, i) =>
-      this.tone({ freq: f, dur: 0.20, type: "sine", vol: 0.22, start: i * 0.06 }));
-    // Bell harmonic on top, longer tail.
-    this.tone({ freq: 2093, dur: 0.45, type: "sine", vol: 0.08, start: 0.18 });
+      this.tone({ freq: f, dur: 0.22, type: "sine", vol: 0.40, start: i * 0.06 }));
+    this.tone({ freq: 2093, dur: 0.45, type: "sine", vol: 0.14, start: 0.18 });
   },
   // Descending wah-wah on sawtooth — bouncy "you lost" cue.
   lose() {
-    this.tone({ freq: 392, dur: 0.14, type: "sawtooth", vol: 0.18,
+    this.tone({ freq: 392, dur: 0.14, type: "sawtooth", vol: 0.35,
                 glideTo: 311 });
-    this.tone({ freq: 311, dur: 0.30, type: "sawtooth", vol: 0.18, start: 0.13,
+    this.tone({ freq: 311, dur: 0.30, type: "sawtooth", vol: 0.35, start: 0.13,
                 glideTo: 220 });
   },
 };
@@ -1093,7 +1097,12 @@ function setMuted(m) {
   else   { b.textContent = "🔊"; b.classList.remove("muted"); }
   try { localStorage.setItem("yt_audio_muted", m ? "1" : "0"); } catch {}
 }
-$("mute-btn").addEventListener("click", () => setMuted(audio.enabled));
+$("mute-btn").addEventListener("click", () => {
+  setMuted(audio.enabled);
+  // If we just turned SFX ON, play a quick confirmation chirp so the user
+  // knows it actually works without having to wait for a trade.
+  if (audio.enabled) audio.fireUp();
+});
 
 // Music toggle (button + "B" hotkey)
 function setMusic(on) {
