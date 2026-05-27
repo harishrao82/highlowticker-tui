@@ -35,7 +35,7 @@
   body {
     display: grid;
     grid-template-rows: 130px 1fr 90px;
-    grid-template-columns: 1fr 340px;
+    grid-template-columns: 1fr 270px;
     gap: 14px;
     padding: 14px;
   }
@@ -321,31 +321,33 @@
   .sig-row {
     background: var(--bg-glow);
     border-left: 3px solid var(--muted);
-    padding: 8px 10px;
+    padding: 6px 9px;
     border-radius: 6px;
-    font-size: 12px;
+    font-size: 11px;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
     transition: opacity .4s ease, transform .4s ease, background .4s ease;
   }
   .sig-row.new {
     animation: slideIn .4s ease;
   }
   @keyframes slideIn {
-    from { opacity: 0; transform: translateY(-8px); background: rgba(0,212,255,0.25); }
+    from { opacity: 0; transform: translateY(-6px); background: rgba(0,212,255,0.25); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .sig-row.live  { border-left-color: var(--gold);   }
   .sig-row.won   { border-left-color: var(--profit); background: linear-gradient(90deg, rgba(0,255,159,0.10), var(--bg-glow)); }
   .sig-row.lost  { border-left-color: var(--loss);   background: linear-gradient(90deg, rgba(255,59,107,0.10), var(--bg-glow)); }
-  .sig-row .when { color: var(--muted); font-size: 10px; letter-spacing: 1px; }
-  .sig-row .dir  { font-weight: 700; }
+  .sig-row .when    { color: var(--muted); font-size: 9px; letter-spacing: 1px; line-height: 1.4; }
+  .sig-row .dir     { font-weight: 700; font-size: 12px; }
   .sig-row .dir.up   { color: var(--profit); }
   .sig-row .dir.down { color: var(--loss);   }
-  .sig-row .pnl-line { display: flex; justify-content: space-between; margin-top: 4px; }
-  .sig-row .status   { font-size: 10px; letter-spacing: 2px; }
-  .sig-row .pnl      { font-weight: 700; }
-  .sig-row .pnl.profit { color: var(--profit); }
-  .sig-row .pnl.loss   { color: var(--loss); }
-  .sig-row .pnl.pending { color: var(--gold); }
+  .sig-row .col     { text-align: right; line-height: 1.2; }
+  .sig-row .col .lbl  { font-size: 8px; letter-spacing: 2px; color: var(--muted); }
+  .sig-row .col .val  { font-weight: 700; font-size: 12px; color: var(--muted); }
+  .sig-row .col .val.profit { color: var(--profit); }
+  .sig-row .col .val.loss   { color: var(--loss); }
 
   /* FOOTER STRIP */
   footer {
@@ -406,23 +408,22 @@
   .conn-chip.warn    { color: var(--gold); }
   .conn-chip.dead    { color: var(--loss); }
 
-  /* MUTE TOGGLE */
-  .mute-btn {
+  /* MUTE + MUSIC TOGGLES */
+  .ctl-btn {
     position: fixed;
-    top: 22px; right: 130px;
+    top: 22px;
     font-size: 16px;
     line-height: 1;
     padding: 4px 10px;
     border-radius: 12px;
-    color: var(--profit);
-    background: rgba(0,255,159,0.08);
-    border: 1px solid rgba(0,255,159,0.25);
     cursor: pointer;
     z-index: 50;
     transition: color .15s ease, background .15s ease;
     user-select: none;
   }
-  .mute-btn.muted {
+  .mute-btn  { right: 130px; color: var(--profit); background: rgba(0,255,159,0.08); border: 1px solid rgba(0,255,159,0.25); }
+  .music-btn { right: 178px; color: var(--accent); background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.25); }
+  .ctl-btn.muted {
     color: var(--muted);
     background: rgba(255,255,255,0.05);
     border-color: rgba(255,255,255,0.10);
@@ -433,7 +434,8 @@
 
 <div id="signal-flash"></div>
 <div class="conn-chip" id="conn">connecting…</div>
-<div class="mute-btn" id="mute-btn" title="Toggle audio (M)">🔊</div>
+<div class="ctl-btn music-btn muted" id="music-btn" title="Toggle ambient music (B)">🎵</div>
+<div class="ctl-btn mute-btn"        id="mute-btn"  title="Toggle SFX (M)">🔊</div>
 
 <header>
   <div>
@@ -447,21 +449,21 @@
 
   <div class="header-center">
     <div class="pnl-hero" id="pnl-session">$0.00</div>
-    <div class="pnl-label">SESSION P&amp;L</div>
+    <div class="pnl-label">TODAY · 24H</div>
   </div>
 
   <div class="header-right">
     <div class="stat-box">
-      <div class="stat-v" id="wr-pct">—</div>
-      <div class="stat-l">WIN RATE</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-v" id="trades-count">0</div>
-      <div class="stat-l">TRADES</div>
-    </div>
-    <div class="stat-box">
       <div class="stat-v" id="window-pnl">$0.00</div>
       <div class="stat-l">THIS WINDOW</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-v" id="hour-pnl">$0.00</div>
+      <div class="stat-l">THIS HOUR</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-v" id="day-pnl">$0.00</div>
+      <div class="stat-l">THIS DAY</div>
     </div>
   </div>
 </header>
@@ -766,7 +768,7 @@ function refreshChartClusters(arbWindow) {
 // pnl, entry_ask. We hide model_p / market_mid / delta_pp on purpose.
 const MAX_TICKER_ROWS = 9;
 let _lastTickerTradeIds = new Set();
-function renderTicker(arbWindow, sessionPnL) {
+function renderTicker(arbWindow) {
   const list = $("ticker-list");
   const trades = (arbWindow && arbWindow.trades) || [];
   if (!trades.length) {
@@ -776,40 +778,47 @@ function renderTicker(arbWindow, sessionPnL) {
     _lastTickerTradeIds = new Set();
     return;
   }
-  // Newest first (per trade_id added order — server appends, so reverse).
-  const recent = trades.slice().reverse().slice(0, MAX_TICKER_ROWS);
+  // chronologically oldest → newest; "prior" of trades[i] is trades[i-1].
+  const chrono = trades.slice();
+  const newIds = new Set();
   const now = Date.now() / 1000;
   const wts = Number(arbWindow.window_open_ts);
-  const newIds = new Set();
+
+  // Take the last MAX_TICKER_ROWS chronologically, then render newest-first.
+  const slice = chrono.slice(-MAX_TICKER_ROWS);
+  const idxStart = chrono.length - slice.length;
+
+  const fmtPnl = (pnl, isLive) => {
+    if (!Number.isFinite(pnl) || isLive) return { txt: "—", cls: "" };
+    return { txt: fmtMoney(pnl), cls: pnl >= 0 ? "profit" : "loss" };
+  };
+
   let html = "";
-  for (const t of recent) {
-    const tid = String(t.trade_id);
+  for (let i = slice.length - 1; i >= 0; i--) {
+    const t      = slice[i];
+    const chronoIdx = idxStart + i;
+    const prior  = chronoIdx > 0 ? chrono[chronoIdx - 1] : null;
+    const tid    = String(t.trade_id);
     newIds.add(tid);
     const fireWall = wts + Number(t.sample_sec);
-    const ago = Math.max(0, now - fireWall);
-    const isUp  = t.direction === "BUY YES";
+    const ago    = Math.max(0, now - fireWall);
+    const isUp   = t.direction === "BUY YES";
     const dirCls = isUp ? "up" : "down";
-    const dirTxt = isUp ? "BUY UP" : "BUY DOWN";
-    const statusCls = t.status === "won" ? "won"
-                    : t.status === "lost" ? "lost"
-                    : "live";
-    const statusTxt = t.status === "won"  ? "WON"
-                    : t.status === "lost" ? "LOST"
-                    : "LIVE";
-    const pnl = Number(t.pnl);
-    const pnlCls = !Number.isFinite(pnl)         ? "pending"
-                 : t.status === "live"            ? "pending"
-                 : pnl >= 0                       ? "profit" : "loss";
-    const pnlTxt = !Number.isFinite(pnl) || t.status === "live"
-                 ? "pending"
-                 : fmtMoney(pnl);
+    const dirTxt = isUp ? "▲ UP" : "▼ DN";
+    const wonCls = t.status === "won" ? " won"
+                 : t.status === "lost" ? " lost" : "";
     const newCls = _lastTickerTradeIds.has(tid) ? "" : " new";
-    html += `<div class="sig-row ${statusCls}${newCls}" data-tid="${tid}">
-      <div class="when">${relTime(ago)} · T+${t.sample_sec}s · entry $${Number(t.entry_ask).toFixed(3)}</div>
-      <div class="pnl-line">
-        <span class="dir ${dirCls}">${dirTxt}</span>
-        <span class="status">${statusTxt} <span class="pnl ${pnlCls}">${pnlTxt}</span></span>
+    const own    = fmtPnl(Number(t.pnl), t.status === "live");
+    const pri    = prior
+                 ? fmtPnl(Number(prior.pnl), prior.status === "live")
+                 : { txt: "—", cls: "" };
+    html += `<div class="sig-row${wonCls}${newCls}" data-tid="${tid}">
+      <div>
+        <div class="dir ${dirCls}">${dirTxt} <span style="color:var(--muted);font-weight:400;">$${Number(t.entry_ask).toFixed(3)}</span></div>
+        <div class="when">${relTime(ago)} · T+${t.sample_sec}s</div>
       </div>
+      <div class="col"><div class="lbl">P&amp;L</div><div class="val ${own.cls}">${own.txt}</div></div>
+      <div class="col"><div class="lbl">PRIOR</div><div class="val ${pri.cls}">${pri.txt}</div></div>
     </div>`;
   }
   list.innerHTML = html;
@@ -849,62 +858,56 @@ function flashSignal(trade) {
 let _sessionWindowsCache = [];
 
 function updateHeaderStats(arbWindow) {
-  // From current arb_window: trade count + W/L + current-window pnl.
+  // ── Current 15-min window pnl (live + settled trades) ──
   const trades = (arbWindow && arbWindow.trades) || [];
-  let wins = 0, losses = 0, live = 0;
   let windowPnl = 0;
+  let wins = 0, losses = 0;
   for (const t of trades) {
     const pnl = Number(t.pnl);
+    if (Number.isFinite(pnl)) windowPnl += pnl;     // live trades carry live MtM
     if (t.status === "won")  wins++;
     else if (t.status === "lost") losses++;
-    else live++;
-    if (Number.isFinite(pnl) && t.status !== "live") windowPnl += pnl;
   }
 
-  // Add session totals from settled windows (cached from /window_pnl_log).
-  let sessionPnl = windowPnl;
-  let sessionWins = wins, sessionLosses = losses;
+  // ── Rolling sums from the settled-window cache ──
+  const nowSec = Date.now() / 1000;
+  const hourCutoff = nowSec - 3600;
+  const dayCutoff  = nowSec - 24 * 3600;
+  let hourPnl = 0, dayPnl = 0;
+  let dayWins = wins, dayLosses = losses;
   let bestWin = 0, worstWin = 0;
   for (const w of _sessionWindowsCache) {
-    sessionPnl    += Number(w.pnl)    || 0;
-    sessionWins   += Number(w.wins)   || 0;
-    sessionLosses += Number(w.losses) || 0;
-    const wp = Number(w.pnl) || 0;
+    const wts = Number(w.window_open_ts);
+    const wp  = Number(w.pnl) || 0;
+    if (wts >= dayCutoff)  { dayPnl  += wp; dayWins += Number(w.wins)||0; dayLosses += Number(w.losses)||0; }
+    if (wts >= hourCutoff) { hourPnl += wp; }
     if (wp > bestWin)  bestWin  = wp;
     if (wp < worstWin) worstWin = wp;
   }
+  // Include in-flight window in HOUR/DAY/HERO totals.
+  hourPnl += windowPnl;
+  dayPnl  += windowPnl;
 
-  const totalTrades = sessionWins + sessionLosses;
-  const wr = totalTrades > 0 ? (sessionWins / totalTrades * 100) : null;
-
-  // Session P&L hero
+  // ── Center hero: TODAY ──
   const pnlEl = $("pnl-session");
-  pnlEl.textContent = fmtMoney(sessionPnl);
-  pnlEl.className = "pnl-hero " + (sessionPnl >= 0 ? "profit" : "loss");
+  pnlEl.textContent = fmtMoney(dayPnl);
+  pnlEl.className = "pnl-hero " + (dayPnl >= 0 ? "profit" : "loss");
 
-  // Window P&L
-  const wpEl = $("window-pnl");
-  wpEl.textContent = fmtMoney(windowPnl);
-  wpEl.style.color = windowPnl >= 0 ? "var(--profit)" : "var(--loss)";
+  // ── Right grid: WINDOW / HOUR / DAY ──
+  const paint = (id, v) => {
+    const el = $(id);
+    el.textContent = fmtMoney(v);
+    el.style.color = v >= 0 ? "var(--profit)" : "var(--loss)";
+  };
+  paint("window-pnl", windowPnl);
+  paint("hour-pnl",   hourPnl);
+  paint("day-pnl",    dayPnl);
 
-  // Win rate
-  const wrEl = $("wr-pct");
-  if (wr == null) {
-    wrEl.textContent = "—"; wrEl.className = "stat-v";
-  } else {
-    wrEl.textContent = wr.toFixed(0) + "%";
-    wrEl.className = "stat-v " + (wr >= 65 ? "wr-good" : wr >= 50 ? "wr-mid" : "wr-bad");
-  }
-
-  // Trade count
-  $("trades-count").textContent = totalTrades + (live > 0 ? ` + ${live}🔥` : "");
-
-  // Footer
-  $("f-wins").textContent   = sessionWins;
-  $("f-losses").textContent = sessionLosses;
+  // ── Footer (unchanged stats: wins/losses today, best/worst, streak) ──
+  $("f-wins").textContent   = dayWins;
+  $("f-losses").textContent = dayLosses;
   $("f-best").textContent   = fmtMoney(bestWin);
   $("f-worst").textContent  = fmtMoney(worstWin);
-  // Streak: walk settled windows back from latest, count consecutive UP/DOWN PnL direction.
   let streakSign = null, streakN = 0;
   for (let i = _sessionWindowsCache.length - 1; i >= 0; i--) {
     const v = Number(_sessionWindowsCache[i].pnl) || 0;
@@ -999,7 +1002,90 @@ const audio = {
 };
 audio.init();
 
-// Mute toggle wired to the button + the "M" hotkey
+// ─── Background ambient pad (looping I-iii-vi-IV progression) ────────────
+//
+// Synthesizes a soft 4-chord loop in C major using stacked sine pairs
+// (each note doubled with a slightly detuned voice for chorus warmth).
+// Each chord plays for 8 seconds with slow attack/release so the
+// transition is a continuous wash, not a hard cut. The scheduler runs
+// ~1s ahead of the audio clock so audio glitches don't open silence
+// gaps. Stays well under any SFX volume.
+const bgMusic = {
+  enabled:    false,
+  gainNode:   null,
+  scheduledUntil: 0,
+  loopHandle: null,
+  _chordIdx:  0,
+  // C major progression: Cmaj7, Em7, Am7, Fmaj7 — peaceful, cycles freely
+  CHORDS: [
+    [130.81, 164.81, 196.00, 246.94],   // Cmaj7   (C3 E3 G3 B3)
+    [164.81, 196.00, 246.94, 293.66],   // Em7     (E3 G3 B3 D4)
+    [110.00, 130.81, 164.81, 196.00],   // Am7     (A2 C3 E3 G3) — bass dip
+    [174.61, 220.00, 261.63, 329.63],   // Fmaj7   (F3 A3 C4 E4)
+  ],
+  CHORD_DUR: 8,   // seconds per chord — 32s full loop
+
+  start() {
+    if (!audio.ctx) return;
+    if (this.gainNode) this.stop();
+    this.gainNode = audio.ctx.createGain();
+    this.gainNode.gain.value = 0.0;
+    this.gainNode.gain.linearRampToValueAtTime(0.08, audio.ctx.currentTime + 1.5);
+    this.gainNode.connect(audio.ctx.destination);
+    this.scheduledUntil = audio.ctx.currentTime;
+    this._chordIdx = 0;
+    this._scheduleAhead();
+    this.loopHandle = setInterval(() => this._scheduleAhead(), 1500);
+  },
+  stop() {
+    if (this.loopHandle) { clearInterval(this.loopHandle); this.loopHandle = null; }
+    if (this.gainNode) {
+      try {
+        const now = audio.ctx.currentTime;
+        this.gainNode.gain.cancelScheduledValues(now);
+        this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
+        this.gainNode.gain.linearRampToValueAtTime(0, now + 1.5);
+        const g = this.gainNode;
+        setTimeout(() => { try { g.disconnect(); } catch {} }, 1800);
+      } catch {}
+      this.gainNode = null;
+    }
+  },
+  _scheduleAhead() {
+    if (!audio.ctx || !this.gainNode || audio.ctx.state !== "running") return;
+    const horizon = audio.ctx.currentTime + 3;
+    while (this.scheduledUntil < horizon) {
+      this._scheduleChord(this.scheduledUntil);
+      this.scheduledUntil += this.CHORD_DUR;
+    }
+  },
+  _scheduleChord(t) {
+    const freqs = this.CHORDS[this._chordIdx % this.CHORDS.length];
+    this._chordIdx++;
+    for (const f of freqs) {
+      this._voice(f,        t);
+      this._voice(f * 1.004, t);   // detune partner for chorus warmth
+    }
+  },
+  _voice(freq, t) {
+    const ctx = audio.ctx;
+    const osc = ctx.createOscillator();
+    const g   = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    osc.connect(g); g.connect(this.gainNode);
+    const dur = this.CHORD_DUR + 1.5;  // overlap into the next chord for cross-fade
+    const attack = 2.0, release = 3.0;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.10, t + attack);
+    g.gain.linearRampToValueAtTime(0.10, t + dur - release);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  },
+};
+
+// SFX mute toggle (button + "M" hotkey)
 function setMuted(m) {
   audio.enabled = !m;
   const b = $("mute-btn");
@@ -1008,11 +1094,24 @@ function setMuted(m) {
   try { localStorage.setItem("yt_audio_muted", m ? "1" : "0"); } catch {}
 }
 $("mute-btn").addEventListener("click", () => setMuted(audio.enabled));
+
+// Music toggle (button + "B" hotkey)
+function setMusic(on) {
+  bgMusic.enabled = on;
+  const b = $("music-btn");
+  if (on) { b.classList.remove("muted"); bgMusic.start(); }
+  else    { b.classList.add("muted");    bgMusic.stop();  }
+  try { localStorage.setItem("yt_bg_music", on ? "1" : "0"); } catch {}
+}
+$("music-btn").addEventListener("click", () => setMusic(!bgMusic.enabled));
+
 document.addEventListener("keydown", e => {
   if (e.key === "m" || e.key === "M") setMuted(audio.enabled);
+  if (e.key === "b" || e.key === "B") setMusic(!bgMusic.enabled);
 });
-// Restore preference from prior session (default: unmuted)
+// Restore preferences (defaults: SFX on, music off)
 try { setMuted(localStorage.getItem("yt_audio_muted") === "1"); } catch { setMuted(false); }
+try { setMusic(localStorage.getItem("yt_bg_music")    === "1"); } catch { setMusic(false); }
 
 // Track status transitions across WS ticks so we only chime once per event.
 // Each trade has trade_id + status ∈ {live, won, lost}; we cache the last
