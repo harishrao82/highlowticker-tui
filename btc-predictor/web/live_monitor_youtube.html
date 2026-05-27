@@ -405,12 +405,35 @@
   .conn-chip.live    { color: var(--profit); }
   .conn-chip.warn    { color: var(--gold); }
   .conn-chip.dead    { color: var(--loss); }
+
+  /* MUTE TOGGLE */
+  .mute-btn {
+    position: fixed;
+    top: 22px; right: 130px;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px 10px;
+    border-radius: 12px;
+    color: var(--profit);
+    background: rgba(0,255,159,0.08);
+    border: 1px solid rgba(0,255,159,0.25);
+    cursor: pointer;
+    z-index: 50;
+    transition: color .15s ease, background .15s ease;
+    user-select: none;
+  }
+  .mute-btn.muted {
+    color: var(--muted);
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.10);
+  }
 </style>
 </head>
 <body>
 
 <div id="signal-flash"></div>
 <div class="conn-chip" id="conn">connecting…</div>
+<div class="mute-btn" id="mute-btn" title="Toggle audio (M)">🔊</div>
 
 <header>
   <div>
@@ -819,6 +842,7 @@ function flashSignal(trade) {
                + `<div class="sub">entry $${Number(trade.entry_ask).toFixed(3)} · T+${trade.sample_sec}s</div>`;
   clearTimeout(_flashTimer);
   _flashTimer = setTimeout(() => { el.className = ""; }, 1400);
+  audio.fire();
 }
 
 // ─── Header session stats (refreshed from arb_window per tick + window log periodic) ──
@@ -907,6 +931,106 @@ function updateCountdown() {
 }
 setInterval(updateCountdown, 1000);
 
+// ─── Audio: synthesized Candy-Crush-style cues via Web Audio API ─────────
+//
+// Three sound effects, all generated on the fly so we don't host any audio
+// files. Triggered by:
+//   fire()  — every brand-new trade (paired with the center-screen flash)
+//   win()   — a live trade transitions to status="won"
+//   lose()  — a live trade transitions to status="lost"
+//
+// Browser autoplay policy: AudioContext starts in "suspended" state until
+// a user gesture. We resume on first click/key/touch. For OBS Browser
+// Source: enable "Control audio via OBS" on the source for it to be heard.
+const audio = {
+  ctx: null, enabled: true,
+  init() {
+    try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch { this.enabled = false; return; }
+    const resume = () => {
+      if (this.ctx.state === "suspended") this.ctx.resume();
+    };
+    ["click","keydown","touchstart"].forEach(ev =>
+      document.addEventListener(ev, resume, { once: false, passive: true }));
+  },
+  // Single oscillator with a fast attack + exponential decay envelope.
+  tone({ freq, dur=0.15, type="sine", vol=0.25, attack=0.005, start=0, glideTo=null }) {
+    if (!this.ctx || !this.enabled || this.ctx.state !== "running") return;
+    const t0 = this.ctx.currentTime + start;
+    const osc = this.ctx.createOscillator();
+    const g   = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t0 + dur);
+    osc.connect(g); g.connect(this.ctx.destination);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.start(t0); osc.stop(t0 + dur + 0.05);
+  },
+  // Bright two-note "blip-bloop" when a new trade appears.
+  fire() {
+    this.tone({ freq: 660, dur: 0.10, type: "triangle", vol: 0.22 });
+    this.tone({ freq: 990, dur: 0.12, type: "triangle", vol: 0.18, start: 0.06 });
+  },
+  // Rising C-major arpeggio + sustained high bell — the "cha-ching".
+  win() {
+    [523, 659, 784, 1047].forEach((f, i) =>
+      this.tone({ freq: f, dur: 0.20, type: "sine", vol: 0.22, start: i * 0.06 }));
+    // Bell harmonic on top, longer tail.
+    this.tone({ freq: 2093, dur: 0.45, type: "sine", vol: 0.08, start: 0.18 });
+  },
+  // Descending wah-wah on sawtooth — bouncy "you lost" cue.
+  lose() {
+    this.tone({ freq: 392, dur: 0.14, type: "sawtooth", vol: 0.18,
+                glideTo: 311 });
+    this.tone({ freq: 311, dur: 0.30, type: "sawtooth", vol: 0.18, start: 0.13,
+                glideTo: 220 });
+  },
+};
+audio.init();
+
+// Mute toggle wired to the button + the "M" hotkey
+function setMuted(m) {
+  audio.enabled = !m;
+  const b = $("mute-btn");
+  if (m) { b.textContent = "🔇"; b.classList.add("muted"); }
+  else   { b.textContent = "🔊"; b.classList.remove("muted"); }
+  try { localStorage.setItem("yt_audio_muted", m ? "1" : "0"); } catch {}
+}
+$("mute-btn").addEventListener("click", () => setMuted(audio.enabled));
+document.addEventListener("keydown", e => {
+  if (e.key === "m" || e.key === "M") setMuted(audio.enabled);
+});
+// Restore preference from prior session (default: unmuted)
+try { setMuted(localStorage.getItem("yt_audio_muted") === "1"); } catch { setMuted(false); }
+
+// Track status transitions across WS ticks so we only chime once per event.
+// Each trade has trade_id + status ∈ {live, won, lost}; we cache the last
+// seen status and play win()/lose() exactly when it flips out of "live".
+const _tradeStatus = new Map();
+let   _statusSeeded = false;
+function reactToTradeStatusChanges(arbWindow) {
+  const trades = (arbWindow && arbWindow.trades) || [];
+  // On first call, just seed the cache silently — don't play sounds for
+  // trades that were already settled when the page loaded.
+  if (!_statusSeeded) {
+    for (const t of trades) _tradeStatus.set(String(t.trade_id), t.status);
+    _statusSeeded = true;
+    return;
+  }
+  for (const t of trades) {
+    const id   = String(t.trade_id);
+    const prev = _tradeStatus.get(id);
+    const cur  = t.status;
+    if (cur !== prev) {
+      _tradeStatus.set(id, cur);
+      if (prev === "live" && cur === "won")  audio.win();
+      if (prev === "live" && cur === "lost") audio.lose();
+    }
+  }
+}
+
 // ─── WS handler ──────────────────────────────────────────────────────────
 const predUrl = (() => {
   if (location.protocol === "file:") return "ws://localhost:8000/ws/predictions";
@@ -937,6 +1061,7 @@ function onPrediction(p) {
   refreshChartClusters(p.arb_window);
   refreshYNStats(p.arb_window);
   maybeFlashNewSignals(p.arb_window);
+  reactToTradeStatusChanges(p.arb_window);
   renderTicker(p.arb_window);
   updateHeaderStats(p.arb_window);
 }
