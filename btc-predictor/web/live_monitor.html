@@ -1137,6 +1137,7 @@ function chartAppend(p) {
   // Refresh the BUY YES / BUY NO cluster markers from p.arb_window.
   // Internally dirty-checks; only repaints when trade count changes.
   refreshArbClusters(p.arb_window);
+  refreshBtcWinClusters(p.arb_window);
 }
 
 // ─── Kalshi ticker pill in the header ───────────────────────────────────
@@ -1515,14 +1516,96 @@ const BTC_WIN_CONFIG = {
 
 function ensureBtcWinInit() {
   if (btcWinInited || !window.Plotly) return;
-  Plotly.newPlot(BTC_WIN_CHART_ID, [{
-    x: [], y: [],
-    name: "BTC",
-    type: "scatter", mode: "lines",
-    line: { color: "#58a6ff", width: 2 },
-    hovertemplate: "T+%{x}s · $%{y:,.2f}<extra></extra>",
-  }], BTC_WIN_LAYOUT, BTC_WIN_CONFIG);
+  Plotly.newPlot(BTC_WIN_CHART_ID, [
+    // 0: BTC price line
+    { x: [], y: [],
+      name: "BTC",
+      type: "scatter", mode: "lines",
+      line: { color: "#58a6ff", width: 2 },
+      hovertemplate: "T+%{x}s · $%{y:,.2f}<extra></extra>" },
+    // 1: BUY YES clusters — green up-triangle, sized by run length
+    { x: [], y: [], text: [],
+      type: "scatter", mode: "markers",
+      name: "BUY YES",
+      marker: { symbol: "triangle-up", size: [], color: "#3fb950",
+                line: { color: "#0a4a1f", width: 1 } },
+      hovertemplate: "%{text}<extra></extra>",
+      showlegend: false },
+    // 2: BUY NO clusters — red down-triangle, sized by run length
+    { x: [], y: [], text: [],
+      type: "scatter", mode: "markers",
+      name: "BUY NO",
+      marker: { symbol: "triangle-down", size: [], color: "#f87171",
+                line: { color: "#4a0d0d", width: 1 } },
+      hovertemplate: "%{text}<extra></extra>",
+      showlegend: false },
+  ], BTC_WIN_LAYOUT, BTC_WIN_CONFIG);
   btcWinInited = true;
+}
+
+// Match a sample_sec to its BTC price from the in-memory series. Falls back
+// to the nearest neighbour so a cluster's midpoint (often non-integer)
+// resolves cleanly. Returns null if the series is empty.
+function btcWinPriceAtSec(sec) {
+  const d = btcWinSeries.data;
+  if (!d.length) return null;
+  let best = d[0], bestGap = Math.abs(d[0].sec - sec);
+  for (const p of d) {
+    const g = Math.abs(p.sec - sec);
+    if (g < bestGap) { best = p; bestGap = g; }
+    if (p.sec >= sec) break;
+  }
+  return best.px;
+}
+
+let _btcWinClusterKey = "";
+function refreshBtcWinClusters(arbWindow) {
+  if (!btcWinInited || !window.Plotly) return;
+  const trades = (arbWindow && arbWindow.trades) || [];
+  const key = `${arbWindow ? arbWindow.window_open_ts : ""}-${trades.length}`;
+  if (key === _btcWinClusterKey) return;
+  _btcWinClusterKey = key;
+  if (!trades.length) {
+    Plotly.restyle(BTC_WIN_CHART_ID, { x: [[],[]], y: [[],[]], text: [[],[]],
+                                       "marker.size": [[],[]] }, [1, 2]);
+    return;
+  }
+  const clusters = clusterTrades(trades);
+  const yesX = [], yesY = [], yesT = [], yesSize = [];
+  const noX  = [], noY  = [], noT  = [], noSize  = [];
+  // Buffer above/below the price line so triangles don't sit on top of it.
+  // 8 bps ≈ $6 on $76k, which is visible without crowding the y-axis.
+  const BUFFER = 0.0008;
+  for (const c of clusters) {
+    const n = c.trades.length;
+    const xMid = (c.first_sec + c.last_sec) / 2;
+    const px = btcWinPriceAtSec(xMid);
+    if (px == null) continue;
+    const isBuyYes = c.direction === "BUY YES";
+    const y = isBuyYes ? px * (1 + BUFFER) : px * (1 - BUFFER);
+    const totalPnl = c.trades.reduce((a, t) => a + Number(t.pnl || 0), 0);
+    const won  = c.trades.filter(t => t.status === "won").length;
+    const lost = c.trades.filter(t => t.status === "lost").length;
+    const live = c.trades.filter(t => t.status === "live").length;
+    const sign = totalPnl >= 0 ? "+" : "−";
+    const span = c.first_sec === c.last_sec
+                 ? `T+${c.first_sec}s` : `T+${c.first_sec}s–${c.last_sec}s`;
+    const wlTxt = live > 0 ? `${won}W/${lost}L · ${live} live` : `${won}W/${lost}L`;
+    const tip = `${c.direction} run (n=${n}) · ${span}<br>`
+              + `BTC ≈ $${px.toFixed(2)} · ${wlTxt}<br>`
+              + `cluster P&L ${sign}$${Math.abs(totalPnl).toFixed(3)}`;
+    if (isBuyYes) {
+      yesX.push(xMid); yesY.push(y); yesT.push(tip); yesSize.push(clusterMarkerSize(n));
+    } else {
+      noX.push(xMid);  noY.push(y);  noT.push(tip);  noSize.push(clusterMarkerSize(n));
+    }
+  }
+  Plotly.restyle(BTC_WIN_CHART_ID, {
+    x:             [yesX, noX],
+    y:             [yesY, noY],
+    text:          [yesT, noT],
+    "marker.size": [yesSize, noSize],
+  }, [1, 2]);
 }
 
 function btcWinAppend(p) {
@@ -1537,8 +1620,12 @@ function btcWinAppend(p) {
     btcWinSeries.windowOpenTs = wTs;
     btcWinSeries.openPx = openPx;
     btcWinSeries.data = [];
+    _btcWinClusterKey = "";
     if (btcWinInited && window.Plotly) {
-      Plotly.restyle(BTC_WIN_CHART_ID, { x: [[]], y: [[]] }, [0]);
+      Plotly.restyle(BTC_WIN_CHART_ID, {
+        x: [[], [], []], y: [[], [], []], text: [[], [], []],
+        "marker.size": [undefined, [], []],
+      });
       Plotly.relayout(BTC_WIN_CHART_ID, {
         "xaxis.range": [0, 900],
         ...(openPx != null ? { "shapes[0].y0": openPx, "shapes[0].y1": openPx } : {}),
