@@ -332,10 +332,10 @@
 
 <div id="chart-panel">
   <div class="chart-head">
-    <div class="chart-title">BTC-USD · CURRENT WINDOW</div>
+    <div class="chart-title">P(UP) · CURRENT WINDOW</div>
     <div>
-      <span class="chart-price" id="btc-price">$—</span>
-      <span class="chart-delta" id="btc-delta">—</span>
+      <span class="chart-price"><span id="kal-pct" style="color:#00d4ff">—</span> <span style="font-size:14px;color:var(--muted);letter-spacing:2px;">MARKET</span></span>
+      <span class="chart-price" style="margin-left:18px;"><span id="mod-pct" style="color:#00ff9f">—</span> <span style="font-size:14px;color:var(--muted);letter-spacing:2px;">A.I.</span></span>
     </div>
   </div>
   <div id="btc-chart"></div>
@@ -393,21 +393,20 @@ function fmtMoney(v) {
   const sign = n >= 0 ? "+" : "−";
   return `${sign}$${Math.abs(n).toFixed(2)}`;
 }
-function fmtPrice(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "$—";
-  return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
 function relTime(secAgo) {
   if (secAgo < 60)   return `${Math.round(secAgo)}s ago`;
   if (secAgo < 3600) return `${Math.round(secAgo/60)}m ago`;
   return `${Math.round(secAgo/3600)}h ago`;
 }
 
-// ─── BTC current-window chart ────────────────────────────────────────────
+// ─── P(UP) current-window chart — Kalshi market vs AI model ──────────────
+// Y-axis 0–1 (rendered 0–100%). Two lines + 50% reference. BUY UP / BUY
+// DOWN triangles positioned at the Kalshi YES side of the trade entry,
+// so viewers see clusters firing right at the moments the two lines
+// diverge.
 const CHART_ID = "btc-chart";
 let chartInited = false;
-const series = { wTs: null, openPx: null, data: [] };
+const series = { wTs: null, data: [] };   // data: [{sec, kalshi_p, model_p}]
 
 const LAYOUT = {
   paper_bgcolor: "#0c1220",
@@ -425,15 +424,17 @@ const LAYOUT = {
     showspikes: false,
   },
   yaxis: {
+    range: [0, 1],
+    tickvals: [0, 0.25, 0.5, 0.75, 1.0],
+    ticktext: ["0%", "25%", "50%", "75%", "100%"],
     gridcolor: "#1a2238",
     zerolinecolor: "#1a2238",
-    tickformat: ",.0f",
     showspikes: false,
   },
   shapes: [
-    // 0: window-open reference line (y rewritten when openPx known)
-    { type: "line", xref: "x", yref: "y", x0: 0, x1: 900, y0: 0, y1: 0,
-      line: { color: "#ffcc00", width: 1.4, dash: "dash" } },
+    // 0: 50% midline — the coin-flip baseline
+    { type: "line", xref: "x", yref: "y", x0: 0, x1: 900, y0: 0.5, y1: 0.5,
+      line: { color: "#ffcc00", width: 1.2, dash: "dash" } },
   ],
 };
 const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: false, staticPlot: true };
@@ -441,14 +442,17 @@ const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: false, sta
 function ensureChartInit() {
   if (chartInited || !window.Plotly) return;
   Plotly.newPlot(CHART_ID, [
-    // 0: BTC price line
-    { x: [], y: [], type: "scatter", mode: "lines",
-      line: { color: "#00d4ff", width: 2.5, shape: "spline", smoothing: 0.6 } },
-    // 1: BUY UP triangles
+    // 0: Kalshi YES mid — market consensus
+    { x: [], y: [], type: "scatter", mode: "lines", name: "MARKET",
+      line: { color: "#00d4ff", width: 2.8, shape: "spline", smoothing: 0.4 } },
+    // 1: Model P(UP) — A.I. view
+    { x: [], y: [], type: "scatter", mode: "lines", name: "A.I.",
+      line: { color: "#00ff9f", width: 2.8, shape: "spline", smoothing: 0.4 } },
+    // 2: BUY UP triangles
     { x: [], y: [], type: "scatter", mode: "markers",
       marker: { symbol: "triangle-up", size: [], color: "#00ff9f",
                 line: { color: "#003a25", width: 1.5 } } },
-    // 2: BUY DOWN triangles
+    // 3: BUY DOWN triangles
     { x: [], y: [], type: "scatter", mode: "markers",
       marker: { symbol: "triangle-down", size: [], color: "#ff3b6b",
                 line: { color: "#3a000f", width: 1.5 } } },
@@ -456,58 +460,22 @@ function ensureChartInit() {
   chartInited = true;
 }
 
-function computeYRange() {
-  const op = series.openPx;
-  if (op == null || !Number.isFinite(op) || op <= 0) return null;
-  if (!series.data.length) return null;
-  let maxDev = 0;
-  for (const p of series.data) {
-    const d = Math.abs(p.px - op);
-    if (d > maxDev) maxDev = d;
-  }
-  const floor = op * 0.0015;     // 15 bps floor
-  const buf   = op * 0.0010;     // 10 bps for triangles
-  const half  = Math.max(maxDev + buf, floor);
-  const pad   = half * 0.25;
-  return [op - half - pad, op + half + pad];
-}
-
-function priceAtSec(sec) {
-  const d = series.data;
-  if (!d.length) return null;
-  let best = d[0], bestGap = Math.abs(d[0].sec - sec);
-  for (const p of d) {
-    const g = Math.abs(p.sec - sec);
-    if (g < bestGap) { best = p; bestGap = g; }
-    if (p.sec >= sec) break;
-  }
-  return best.px;
-}
-
-function btcChartPush(p) {
-  const wTs    = Number(p.window_open_ts);
-  const openPx = p.window_open_px != null ? Number(p.window_open_px) : null;
-  const sec    = Number(p.sample_sec);
-  const px     = p.current_price != null ? Number(p.current_price) : null;
-  if (!Number.isFinite(sec) || px == null || !Number.isFinite(px)) return;
+function probChartPush(p) {
+  const wTs   = Number(p.window_open_ts);
+  const sec   = Number(p.sample_sec);
+  const mPy   = Number(p.p_green);
+  const kPy   = (p.kalshi && p.kalshi.yes_mid != null) ? Number(p.kalshi.yes_mid) : null;
+  if (!Number.isFinite(sec) || !Number.isFinite(mPy)) return;
 
   const changed = series.wTs !== wTs;
   if (changed) {
     series.wTs = wTs;
-    series.openPx = openPx;
     series.data = [];
     _clusterKey = "";
     ensureChartInit();
     if (chartInited && window.Plotly) {
-      Plotly.restyle(CHART_ID, { x: [[],[],[]], y: [[],[],[]] });
-      const lay = { "xaxis.range": [0, 900] };
-      if (openPx != null) { lay["shapes[0].y0"] = openPx; lay["shapes[0].y1"] = openPx; }
-      Plotly.relayout(CHART_ID, lay);
-    }
-  } else if (openPx != null && series.openPx == null) {
-    series.openPx = openPx;
-    if (chartInited && window.Plotly) {
-      Plotly.relayout(CHART_ID, { "shapes[0].y0": openPx, "shapes[0].y1": openPx });
+      Plotly.restyle(CHART_ID, { x: [[],[],[],[]], y: [[],[],[],[]] });
+      Plotly.relayout(CHART_ID, { "xaxis.range": [0, 900] });
     }
   }
 
@@ -516,28 +484,19 @@ function btcChartPush(p) {
 
   const last = series.data[series.data.length - 1];
   if (!last || sec !== last.sec) {
-    series.data.push({ sec, px });
-    Plotly.extendTraces(CHART_ID, { x: [[sec]], y: [[px]] }, [0]);
-    const r = computeYRange();
-    if (r) Plotly.relayout(CHART_ID, { "yaxis.range": r });
+    series.data.push({ sec, kalshi_p: kPy, model_p: mPy });
+    Plotly.extendTraces(CHART_ID, {
+      x: [[sec], [sec]],
+      y: [[kPy], [mPy]],
+    }, [0, 1]);
   } else {
-    last.px = px;
+    last.kalshi_p = kPy;
+    last.model_p  = mPy;
   }
 
-  // Header price + delta
-  $("btc-price").textContent = fmtPrice(px);
-  const dEl = $("btc-delta");
-  const op = series.openPx;
-  if (op != null && Number.isFinite(op) && op > 0) {
-    const d   = px - op;
-    const bps = (px / op - 1) * 10000;
-    const sign = d >= 0 ? "▲" : "▼";
-    dEl.className = "chart-delta " + (d >= 0 ? "profit" : "loss");
-    dEl.innerHTML = `${sign} ${Math.abs(bps).toFixed(1)} bps`;
-  } else {
-    dEl.textContent = "—";
-    dEl.className = "chart-delta";
-  }
+  // Header percent badges
+  $("mod-pct").textContent = (mPy * 100).toFixed(0) + "%";
+  $("kal-pct").textContent = kPy != null ? (kPy * 100).toFixed(0) + "%" : "—";
 }
 
 // ─── Clustering for the chart triangles ──────────────────────────────────
@@ -569,26 +528,27 @@ function refreshChartClusters(arbWindow) {
   if (key === _clusterKey) return;
   _clusterKey = key;
   if (!trades.length) {
-    Plotly.restyle(CHART_ID, { x: [[],[]], y: [[],[]], "marker.size": [[],[]] }, [1, 2]);
+    Plotly.restyle(CHART_ID, { x: [[],[]], y: [[],[]], "marker.size": [[],[]] }, [2, 3]);
     return;
   }
   const clusters = clusterTrades(trades);
   const upX = [], upY = [], upSize = [];
   const dnX = [], dnY = [], dnSize = [];
-  const BUF = 0.0010;   // 10 bps
   for (const c of clusters) {
     const xMid = (c.first_sec + c.last_sec) / 2;
-    const px = priceAtSec(xMid);
-    if (px == null) continue;
+    // Position triangle at the Kalshi YES level of the entry.
+    //   BUY YES → entry_ask is the YES price paid
+    //   BUY NO  → entry_ask is the NO price paid; on YES axis, that's 1−ask
+    const avgEntry = c.trades.reduce((a, t) => a + Number(t.entry_ask), 0) / c.trades.length;
     const isUp = c.direction === "BUY YES";
-    const y = isUp ? px * (1 + BUF) : px * (1 - BUF);
+    const y = isUp ? avgEntry : (1 - avgEntry);
     const sz = clusterMarkerSize(c.trades.length);
     if (isUp) { upX.push(xMid); upY.push(y); upSize.push(sz); }
     else      { dnX.push(xMid); dnY.push(y); dnSize.push(sz); }
   }
   Plotly.restyle(CHART_ID, {
     x: [upX, dnX], y: [upY, dnY], "marker.size": [upSize, dnSize]
-  }, [1, 2]);
+  }, [2, 3]);
 }
 
 // ─── Signal feed (right ticker) ──────────────────────────────────────────
@@ -780,7 +740,7 @@ function connectPred() {
   predWs.onmessage = (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg && msg.type === "history" && Array.isArray(msg.points)) {
-      for (const p of msg.points) btcChartPush(p);
+      for (const p of msg.points) probChartPush(p);
       return;
     }
     onPrediction(msg);
@@ -788,7 +748,7 @@ function connectPred() {
 }
 
 function onPrediction(p) {
-  btcChartPush(p);
+  probChartPush(p);
   refreshChartClusters(p.arb_window);
   maybeFlashNewSignals(p.arb_window);
   renderTicker(p.arb_window);
