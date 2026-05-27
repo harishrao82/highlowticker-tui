@@ -43,6 +43,26 @@ ALL_FEATURE_NAMES: list[str] = (
     list(FEATURE_NAMES) + DERIVED_FEATURE_NAMES + ["sample_sec"]
 )
 
+# Subset of ALL_FEATURE_NAMES that is *venue-agnostic* — i.e. computed from
+# 60-second TWAP-smoothed prices or context (session/day/prior window) rather
+# than from raw tick counts. Use this when training on one venue (e.g.
+# Binance) but serving on another (e.g. Coinbase): the dropped features
+# (volume/flow + sub-minute 1-min sequence + their derivatives) would
+# otherwise carry venue-specific scale that doesn't transfer.
+_VENUE_SENSITIVE = {
+    # Group B — raw-tick volume + flow
+    "volume_pace",
+    "flow_imbalance_30s", "flow_imbalance_60s", "flow_imbalance_300s",
+    "trade_rate_ratio",
+    # Group D — sub-minute O/C sequence
+    "consecutive_1min_run", "green_ratio", "avg_1min_body",
+    # Derived — depend on flow_imbalance_*
+    "flow_short_long_alignment", "flow_momentum",
+}
+VENUE_AGNOSTIC_FEATURE_NAMES: list[str] = [
+    f for f in ALL_FEATURE_NAMES if f not in _VENUE_SENSITIVE
+]
+
 CATEGORICAL_FEATURES = [
     "session_bucket", "day_of_week", "is_weekend",
     "late_candle_flag", "early_candle_flag",
@@ -139,25 +159,27 @@ def train_model(
     half_life_days: float = 90.0,
     num_boost_round: int = 2000,
     early_stopping_rounds: int = 75,
+    feature_names: list[str] | None = None,
 ) -> lgb.Booster:
-    X_tr = train_df[ALL_FEATURE_NAMES].to_numpy()
+    feats = feature_names if feature_names is not None else ALL_FEATURE_NAMES
+    X_tr = train_df[feats].to_numpy()
     y_tr = train_df["label"].to_numpy()
-    X_va = val_df[ALL_FEATURE_NAMES].to_numpy()
+    X_va = val_df[feats].to_numpy()
     y_va = val_df["label"].to_numpy()
     w_tr = recency_weights(train_df["window_open"], half_life_days)
 
-    cat_idx = [ALL_FEATURE_NAMES.index(c) for c in CATEGORICAL_FEATURES]
+    cat_idx = [feats.index(c) for c in CATEGORICAL_FEATURES if c in feats]
 
     dtrain = lgb.Dataset(
         X_tr, y_tr, weight=w_tr,
-        feature_name=ALL_FEATURE_NAMES,
+        feature_name=feats,
         categorical_feature=cat_idx,
         free_raw_data=False,
     )
     dval = lgb.Dataset(
         X_va, y_va,
         reference=dtrain,
-        feature_name=ALL_FEATURE_NAMES,
+        feature_name=feats,
         free_raw_data=False,
     )
 
@@ -173,8 +195,10 @@ def train_model(
     )
 
 
-def evaluate(model: lgb.Booster, test_df: pd.DataFrame) -> dict:
-    X = test_df[ALL_FEATURE_NAMES].to_numpy()
+def evaluate(model: lgb.Booster, test_df: pd.DataFrame,
+             feature_names: list[str] | None = None) -> dict:
+    feats = feature_names if feature_names is not None else ALL_FEATURE_NAMES
+    X = test_df[feats].to_numpy()
     y = test_df["label"].to_numpy()
     prob = model.predict(X)
     pred = (prob > 0.5).astype(int)

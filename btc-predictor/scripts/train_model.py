@@ -15,6 +15,7 @@ import joblib  # noqa: E402
 
 from src.training.trainer import (  # noqa: E402
     ALL_FEATURE_NAMES,
+    VENUE_AGNOSTIC_FEATURE_NAMES,
     candle_level_split,
     evaluate,
     load_and_prepare,
@@ -45,14 +46,23 @@ def main() -> None:
         default=REPO_ROOT / "src" / "model" / "training_metadata.json",
     )
     parser.add_argument("--half-life-days", type=float, default=90.0)
+    parser.add_argument(
+        "--feature-set", choices=["all", "venue_agnostic"], default="all",
+        help="'all' uses every feature; 'venue_agnostic' drops volume + flow "
+             "features (Group B + D + derived flow) so a model trained on "
+             "Binance ticks transfers cleanly to a Coinbase tick stream at "
+             "serve time. See trainer.py:_VENUE_SENSITIVE for the exact list.",
+    )
     args = parser.parse_args()
+
+    feats = (VENUE_AGNOSTIC_FEATURE_NAMES if args.feature_set == "venue_agnostic"
+             else ALL_FEATURE_NAMES)
 
     t0 = time.time()
     print(f"[1/4] Loading {args.data}")
     df = load_and_prepare(args.data)
     print(f"  rows = {len(df):,}   windows = {df['window_open'].nunique():,}")
-    print(f"  features = {len(ALL_FEATURE_NAMES)}  "
-          f"(21 base + 7 derived + sample_sec)")
+    print(f"  feature-set = {args.feature_set}  →  {len(feats)} features")
 
     print("\n[2/4] Chronological candle-level split (70/15/15)")
     train_df, val_df, test_df = candle_level_split(df)
@@ -63,20 +73,22 @@ def main() -> None:
               f"green_ratio={sub['label'].mean():.3f}")
 
     print(f"\n[3/4] Training LightGBM (recency half_life = {args.half_life_days} days)")
-    model = train_model(train_df, val_df, half_life_days=args.half_life_days)
+    model = train_model(train_df, val_df,
+                        half_life_days=args.half_life_days,
+                        feature_names=feats)
     print(f"  best_iteration = {model.best_iteration}")
 
     args.model_out.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(
-        {"model": model, "feature_cols": ALL_FEATURE_NAMES},
+        {"model": model, "feature_cols": feats},
         args.model_out,
     )
-    args.feature_names_out.write_text(json.dumps(ALL_FEATURE_NAMES, indent=2))
+    args.feature_names_out.write_text(json.dumps(feats, indent=2))
     print(f"  Saved → {args.model_out}")
     print(f"  Saved → {args.feature_names_out}")
 
     print("\n[4/4] Evaluating on held-out test set")
-    metrics = evaluate(model, test_df)
+    metrics = evaluate(model, test_df, feature_names=feats)
 
     metadata = {
         # Position features come from the TWAP-60 series during training; the
@@ -97,8 +109,9 @@ def main() -> None:
         },
         "best_iteration": int(model.best_iteration),
         "half_life_days": float(args.half_life_days),
-        "n_features": len(ALL_FEATURE_NAMES),
-        "feature_names": ALL_FEATURE_NAMES,
+        "feature_set": args.feature_set,
+        "n_features": len(feats),
+        "feature_names": feats,
         "metrics": metrics,
     }
     args.metadata_out.write_text(json.dumps(metadata, indent=2, default=str))
