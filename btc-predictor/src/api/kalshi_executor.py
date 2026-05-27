@@ -15,6 +15,7 @@ Two safety gates:
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import math
@@ -26,6 +27,12 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+
+try:
+    from zoneinfo import ZoneInfo
+    _ET = ZoneInfo("America/New_York")
+except Exception:
+    _ET = None
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "trading" / "kalshi"))
@@ -65,6 +72,48 @@ MARKET_CAP_CENTS   = 5       # market fallback cap = current_ask + 5¢
 PRICE_MIN          = 0.05    # don't trade lottery tickets
 PRICE_MAX          = 0.95    # don't trade near-certainties
 MAX_QUOTE_AGE_SEC  = 3       # don't trust stale bid/ask snapshots
+
+
+# ── Paper-only zones (ET) ────────────────────────────────────────────
+# When the current ET wall-clock falls inside one of these ranges, the
+# bot still records the trade in arb_trades.jsonl (paper PnL settled at
+# window close, same as paper mode) but skips the live Kalshi order. Use
+# this to collect calibration data for hours that historically lose
+# money without burning real capital.
+#
+# 3.3-day backtest (2026-05-23 → 2026-05-27) showed these zones leaked
+# ~$470 across ~3.3 days — 63% of the cumulative gross PnL.
+#
+# Each entry is (HH:MM_start, HH:MM_end) — start inclusive, end exclusive.
+# Times are ET; DST is handled by ZoneInfo.
+PAPER_ONLY_ZONES_ET: list[tuple[str, str]] = [
+    ("01:00", "02:00"),   # 01h ET  — hit 30%, ROI −56%
+    ("04:00", "05:00"),   # 04h ET  — :00 and :45 slots both ≤15% hit
+    ("06:00", "07:00"),   # 06h ET  — hit 38%, ROI −47%
+    ("15:00", "16:30"),   # 15h ET + first half of 16h
+]
+
+
+def _hm_to_minutes(hm: str) -> int:
+    h, m = hm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _now_in_paper_only_zone(now: Optional[dt.datetime] = None
+                            ) -> tuple[bool, str]:
+    """Return (in_zone, label) for the current ET time.
+
+    If zoneinfo isn't available (very old environments) we silently
+    treat all times as live-trading-OK.
+    """
+    if _ET is None:
+        return False, ""
+    et_now = now.astimezone(_ET) if now else dt.datetime.now(_ET)
+    minute_of_day = et_now.hour * 60 + et_now.minute
+    for start, end in PAPER_ONLY_ZONES_ET:
+        if _hm_to_minutes(start) <= minute_of_day < _hm_to_minutes(end):
+            return True, f"{start}-{end} ET"
+    return False, ""
 
 
 async def _post_order(client: httpx.AsyncClient, payload: dict, label: str
@@ -178,6 +227,12 @@ async def place_arb_buy(
     if KILL_SWITCH_FILE.exists():
         log.info("[%s] kill-switch file present — order skipped", tag)
         return _finish("skip_kill_switch")
+    paper_only, zone_label = _now_in_paper_only_zone()
+    if paper_only:
+        log.info("[%s] %s is a paper-only zone — live order skipped (paper tracked)",
+                 tag, zone_label)
+        return _finish("skip_paper_only_window",
+                       final_status=f"zone={zone_label}")
 
     yb = snapshot.get("yes_bid"); ya = snapshot.get("yes_ask")
     if yb is None or ya is None:
