@@ -64,9 +64,22 @@ KILL_SWITCH_FILE = Path(os.environ.get("BTC_PRED_KILL_SWITCH",
 EXECUTION_RESULTS_LOG = REPO_ROOT / "btc-predictor" / "data" / "execution_results.jsonl"
 
 # ── Execution params (backtest-validated; see scripts/tune_execution_dropvsfallback.py)
-MAKER_OFFSET_CENTS = 0       # post at bid
-MAKER_TTL_SEC      = 3       # 3-second maker TTL
-MARKET_CAP_CENTS   = 5       # market fallback cap = current_ask + 5¢
+# All overridable via env so Mac and AWS can run different fill strategies from
+# the same codebase. Defaults match the current AWS pattern:
+#   maker @ bid (3s) → market @ ask+5¢ cap → drop
+#
+# Semantics (positive cents = below bid for the limit, above ask for the cap):
+#   EXEC_LIMIT_OFFSET_CENTS  — limit_price = bid − N¢   (0 = at bid)
+#   EXEC_MAKER_TTL_SEC       — seconds to wait for the maker fill
+#   EXEC_MARKET_CAP_CENTS    — market fallback cap = ask + N¢
+#   EXEC_DISABLE_MARKET_FALLBACK  — "1" = no market fallback; drop on maker expiry
+#
+# Mac conservative example (post 4¢ below bid, 30s wait, no fallback):
+#   EXEC_LIMIT_OFFSET_CENTS=4  EXEC_MAKER_TTL_SEC=30  EXEC_DISABLE_MARKET_FALLBACK=1
+MAKER_OFFSET_CENTS = int(os.environ.get("EXEC_LIMIT_OFFSET_CENTS", "0"))
+MAKER_TTL_SEC      = int(os.environ.get("EXEC_MAKER_TTL_SEC", "3"))
+MARKET_CAP_CENTS   = int(os.environ.get("EXEC_MARKET_CAP_CENTS", "5"))
+DISABLE_MARKET_FALLBACK = os.environ.get("EXEC_DISABLE_MARKET_FALLBACK") == "1"
 
 # ── Sanity gates (mirror the simulator's ARB_MIN_SAMPLE_SEC + price band)
 PRICE_MIN          = 0.05    # don't trade lottery tickets
@@ -283,10 +296,19 @@ async def place_arb_buy(
                 actual_fill_price=avg, fee_dollars=st["fees"],
                 shares_filled=st["filled"], final_status=st["status"],
             )
+        if DISABLE_MARKET_FALLBACK:
+            log.info("[%s] maker expired (status=%s, filled=%.2f) — fallback "
+                     "disabled, dropping", tag, st["status"], st["filled"])
+            return _finish("drop_maker_expired",
+                           final_status=st["status"],
+                           shares_filled=st["filled"])
         log.info("[%s] maker expired (status=%s, filled=%.2f) → trying market",
                  tag, st["status"], st["filled"])
 
     # ── Step 2: Market fallback @ ask+5¢ cap ──────────────────────────
+    if DISABLE_MARKET_FALLBACK:
+        # Maker POST itself failed (m is None) — drop instead of fallback.
+        return _finish("drop_maker_post_failed_no_fallback")
     # Use the bid/ask we have; in a perfect world we'd re-poll, but the
     # Kalshi WS in our server is already updating snapshots — caller can
     # pass a freshly-updated snapshot if they prefer. For now, base the cap
