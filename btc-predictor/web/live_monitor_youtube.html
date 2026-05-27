@@ -35,7 +35,7 @@
   body {
     display: grid;
     grid-template-rows: 130px 1fr 90px;
-    grid-template-columns: 1fr 270px;
+    grid-template-columns: 1fr 230px;
     gap: 14px;
     padding: 14px;
   }
@@ -55,18 +55,19 @@
   }
   .brand {
     font-family: "Bebas Neue", sans-serif;
-    font-size: 38px;
-    letter-spacing: 6px;
+    font-size: 32px;
+    letter-spacing: 4px;
     background: linear-gradient(90deg, var(--accent), var(--profit));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+    white-space: nowrap;
   }
   .brand-sub {
     font-size: 10px;
-    letter-spacing: 4px;
+    letter-spacing: 3px;
     color: var(--muted);
-    margin-top: -4px;
+    margin-top: -2px;
   }
   .pulse-dot {
     display: inline-block;
@@ -325,8 +326,8 @@
     border-radius: 6px;
     font-size: 11px;
     display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 8px;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
     align-items: center;
     transition: opacity .4s ease, transform .4s ease, background .4s ease;
   }
@@ -349,20 +350,73 @@
   .sig-row .col .val.profit { color: var(--profit); }
   .sig-row .col .val.loss   { color: var(--loss); }
 
-  /* FOOTER STRIP */
+  /* FOOTER — past windows strip */
   footer {
     grid-column: 1 / -1;
     background: var(--bg-panel);
     border: 1px solid #1a2440;
     border-radius: 14px;
-    padding: 12px 24px;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 18px;
-    align-items: center;
+    padding: 10px 18px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
   }
-  .footer-stat .v { font-size: 22px; font-weight: 700; line-height: 1; }
-  .footer-stat .l { font-size: 9px; letter-spacing: 3px; color: var(--muted); margin-top: 4px; }
+  .past-title {
+    font-family: "Bebas Neue";
+    font-size: 14px;
+    letter-spacing: 5px;
+    color: var(--accent);
+  }
+  .past-strip {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-behavior: smooth;
+    padding-bottom: 2px;
+  }
+  .past-strip::-webkit-scrollbar { height: 6px; }
+  .past-strip::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); border-radius: 3px; }
+  .past-strip::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.18); border-radius: 3px; }
+  .past-empty {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 2px;
+    padding: 8px 4px;
+  }
+  .past-card {
+    flex: 0 0 auto;
+    background: var(--bg-glow);
+    border: 1px solid #1a2440;
+    border-radius: 8px;
+    padding: 6px 12px;
+    min-width: 132px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 10px;
+    row-gap: 1px;
+    align-items: baseline;
+    font-size: 11px;
+  }
+  .past-card.win  { border-left: 3px solid var(--profit); }
+  .past-card.lose { border-left: 3px solid var(--loss);   }
+  .past-card.flat { border-left: 3px solid var(--muted);  }
+  .past-card .pc-time {
+    grid-column: 1 / -1;
+    font-family: "Bebas Neue";
+    font-size: 13px;
+    letter-spacing: 3px;
+    color: var(--text);
+  }
+  .past-card .pc-time .pc-out { font-size: 11px; margin-left: 6px; }
+  .past-card .pc-time .pc-out.up   { color: var(--profit); }
+  .past-card .pc-time .pc-out.down { color: var(--loss); }
+  .past-card .pc-l { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+  .past-card .pc-v { text-align: right; font-weight: 700; }
+  .past-card .pc-v.profit { color: var(--profit); }
+  .past-card .pc-v.loss   { color: var(--loss); }
+  .past-card .pc-v.muted  { color: var(--muted); }
 
   /* SIGNAL FLASH OVERLAY */
   #signal-flash {
@@ -439,8 +493,8 @@
 
 <header>
   <div>
-    <div class="brand">BTC <span style="color:var(--profit)">·</span> ALGO</div>
-    <div class="brand-sub">15-MIN AUTONOMOUS · PAPER · NOT FINANCIAL ADVICE</div>
+    <div class="brand">KALSHI BOT <span style="color:var(--profit)">·</span> BTC 15-MIN</div>
+    <div class="brand-sub">AUTONOMOUS · PAPER · NOT FINANCIAL ADVICE</div>
     <div style="margin-top:10px;">
       <span class="pulse-dot"></span>
       <span class="live-tag">LIVE</span>
@@ -523,25 +577,9 @@
 </div>
 
 <footer>
-  <div class="footer-stat">
-    <div class="v" id="f-wins" style="color:var(--profit)">0</div>
-    <div class="l">WINS TODAY</div>
-  </div>
-  <div class="footer-stat">
-    <div class="v" id="f-losses" style="color:var(--loss)">0</div>
-    <div class="l">LOSSES TODAY</div>
-  </div>
-  <div class="footer-stat">
-    <div class="v" id="f-best" style="color:var(--profit)">$0.00</div>
-    <div class="l">BEST WINDOW</div>
-  </div>
-  <div class="footer-stat">
-    <div class="v" id="f-worst" style="color:var(--loss)">$0.00</div>
-    <div class="l">WORST WINDOW</div>
-  </div>
-  <div class="footer-stat">
-    <div class="v" id="f-streak">—</div>
-    <div class="l">STREAK</div>
+  <div class="past-title">PAST WINDOWS</div>
+  <div class="past-strip" id="past-strip">
+    <div class="past-empty">waiting for first settle…</div>
   </div>
 </footer>
 
@@ -778,15 +816,12 @@ function renderTicker(arbWindow) {
     _lastTickerTradeIds = new Set();
     return;
   }
-  // chronologically oldest → newest; "prior" of trades[i] is trades[i-1].
-  const chrono = trades.slice();
   const newIds = new Set();
   const now = Date.now() / 1000;
   const wts = Number(arbWindow.window_open_ts);
 
   // Take the last MAX_TICKER_ROWS chronologically, then render newest-first.
-  const slice = chrono.slice(-MAX_TICKER_ROWS);
-  const idxStart = chrono.length - slice.length;
+  const slice = trades.slice(-MAX_TICKER_ROWS);
 
   const fmtPnl = (pnl, isLive) => {
     if (!Number.isFinite(pnl) || isLive) return { txt: "—", cls: "" };
@@ -796,8 +831,6 @@ function renderTicker(arbWindow) {
   let html = "";
   for (let i = slice.length - 1; i >= 0; i--) {
     const t      = slice[i];
-    const chronoIdx = idxStart + i;
-    const prior  = chronoIdx > 0 ? chrono[chronoIdx - 1] : null;
     const tid    = String(t.trade_id);
     newIds.add(tid);
     const fireWall = wts + Number(t.sample_sec);
@@ -809,16 +842,12 @@ function renderTicker(arbWindow) {
                  : t.status === "lost" ? " lost" : "";
     const newCls = _lastTickerTradeIds.has(tid) ? "" : " new";
     const own    = fmtPnl(Number(t.pnl), t.status === "live");
-    const pri    = prior
-                 ? fmtPnl(Number(prior.pnl), prior.status === "live")
-                 : { txt: "—", cls: "" };
     html += `<div class="sig-row${wonCls}${newCls}" data-tid="${tid}">
       <div>
         <div class="dir ${dirCls}">${dirTxt} <span style="color:var(--muted);font-weight:400;">$${Number(t.entry_ask).toFixed(3)}</span></div>
         <div class="when">${relTime(ago)} · T+${t.sample_sec}s</div>
       </div>
       <div class="col"><div class="lbl">P&amp;L</div><div class="val ${own.cls}">${own.txt}</div></div>
-      <div class="col"><div class="lbl">PRIOR</div><div class="val ${pri.cls}">${pri.txt}</div></div>
     </div>`;
   }
   list.innerHTML = html;
@@ -903,24 +932,46 @@ function updateHeaderStats(arbWindow) {
   paint("hour-pnl",   hourPnl);
   paint("day-pnl",    dayPnl);
 
-  // ── Footer (unchanged stats: wins/losses today, best/worst, streak) ──
-  $("f-wins").textContent   = dayWins;
-  $("f-losses").textContent = dayLosses;
-  $("f-best").textContent   = fmtMoney(bestWin);
-  $("f-worst").textContent  = fmtMoney(worstWin);
-  let streakSign = null, streakN = 0;
-  for (let i = _sessionWindowsCache.length - 1; i >= 0; i--) {
-    const v = Number(_sessionWindowsCache[i].pnl) || 0;
-    const s = v >= 0 ? 1 : -1;
-    if (streakSign === null) streakSign = s;
-    if (s === streakSign) streakN++; else break;
+}
+
+// ── PAST WINDOWS strip footer ──
+//
+// Renders one card per recent settled 15-min window, newest on the left,
+// with the window's cost basis and net profit. Cost ≈ wins×winner_avg_entry
+// + losses×loser_avg_entry (server logs the avg entry per side and the
+// counts; size=1 in paper mode so this is the actual dollars in).
+function refreshPastWindows() {
+  const strip = $("past-strip");
+  const rows  = _sessionWindowsCache.slice();
+  if (!rows.length) {
+    strip.innerHTML = `<div class="past-empty">waiting for first settle…</div>`;
+    return;
   }
-  const sEl = $("f-streak");
-  if (streakSign === null) { sEl.textContent = "—"; sEl.style.color = ""; }
-  else {
-    sEl.textContent = `${streakN}W ${streakSign > 0 ? "🔥" : "❄️"}`;
-    sEl.style.color = streakSign > 0 ? "var(--profit)" : "var(--loss)";
+  // Newest first
+  rows.reverse();
+  let html = "";
+  for (const w of rows.slice(0, 24)) {
+    const wts  = Number(w.window_open_ts) * 1000;
+    const dt   = new Date(wts);
+    const time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+    const outcome = (w.outcome || "").toUpperCase();
+    const isUp = outcome === "UP";
+    const pnl   = Number(w.pnl) || 0;
+    const wins  = Number(w.wins) || 0;
+    const losses= Number(w.losses) || 0;
+    const wAvg  = Number(w.winner_avg_entry);
+    const lAvg  = Number(w.loser_avg_entry);
+    const cost  = (Number.isFinite(wAvg) ? wAvg * wins   : 0) +
+                  (Number.isFinite(lAvg) ? lAvg * losses : 0);
+    const cls   = pnl > 0 ? "win" : pnl < 0 ? "lose" : "flat";
+    const pnlCls = pnl > 0 ? "profit" : pnl < 0 ? "loss" : "muted";
+    html += `<div class="past-card ${cls}">
+      <div class="pc-time">${time}<span class="pc-out ${isUp ? "up" : "down"}">${isUp ? "▲" : "▼"}</span></div>
+      <div class="pc-l">SPENT</div><div class="pc-v muted">$${cost.toFixed(2)}</div>
+      <div class="pc-l">MADE</div> <div class="pc-v ${pnlCls}">${fmtMoney(pnl)}</div>
+    </div>`;
   }
+  strip.innerHTML = html;
 }
 
 // ─── Countdown to next window roll ───────────────────────────────────────
@@ -1194,6 +1245,7 @@ async function refreshWindowLog() {
     // Session = today (rolling 24h from now to keep YouTube viewers anchored).
     const cutoff = Date.now()/1000 - 24*3600;
     _sessionWindowsCache = rows.filter(w => Number(w.window_open_ts) >= cutoff);
+    refreshPastWindows();
   } catch (e) { /* keep last good cache */ }
 }
 refreshWindowLog();
