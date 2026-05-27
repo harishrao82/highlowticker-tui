@@ -1,0 +1,1589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BTC 15-min live monitor</title>
+<style>
+  :root {
+    --bg:        #0e1116;
+    --panel:     #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --green:     #3fb950;
+    --red:       #f85149;
+    --accent:    #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: 0.5px; }
+  .pill {
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .pill.live      { color: var(--green); border-color: var(--green); }
+  .pill.connecting { color: #d29922; border-color: #d29922; }
+  .pill.dead       { color: var(--red);  border-color: var(--red); }
+
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+  /* Generic full-width stack — keeps existing .stack class working. */
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+
+  /* Log section at the bottom — full-width, stacked */
+  section.logs {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .panel h2 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+  }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+
+  #tv_widget { width: 100%; height: 420px; }
+
+  /* Big UP% display */
+  .hero {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: stretch;
+  }
+  .hero-cell {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+  }
+  .hero-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+  }
+  .hero-value {
+    font-size: 42px;
+    font-weight: 600;
+    margin-top: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-sub {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .accent { color: var(--accent); }
+
+  /* Stats grid */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px 16px;
+  }
+  .stats .k { color: var(--muted); }
+  .stats .v { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Model-vs-Kalshi probability grid */
+  .prob-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 28px;
+    margin: 6px 0 14px;
+  }
+  .prob-cell { padding: 6px 0; }
+  .prob-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .prob-value {
+    font-size: 36px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.05;
+    color: #d29922;             /* amber, matches the reference dashboard */
+  }
+  .prob-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .model-meta {
+    font-size: 10.5px;
+    color: var(--muted);
+    text-align: left;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+  }
+  .model-meta .lbl { color: #6e7681; }
+
+  .candle-meta {
+    font-size: 11px;
+    color: var(--text);
+    text-align: left;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.65;
+  }
+  .candle-meta .row { display: block; }
+  .candle-meta .lbl {
+    display: inline-block;
+    width: 70px;
+    color: #6e7681;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .candle-meta .g { color: var(--green); }
+  .candle-meta .r { color: var(--red); }
+  .candle-meta .d { color: var(--muted); }
+
+  /* (Legacy) YES/NO comparison table */
+  table.yn {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 4px 0 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  table.yn th {
+    text-align: center;
+    padding: 6px 10px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    font-weight: normal;
+    border-bottom: 1px solid var(--border);
+  }
+  table.yn th.up-h { color: var(--green); }
+  table.yn th.no-h { color: var(--red);   }
+  table.yn td {
+    padding: 12px 10px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  table.yn td.lbl {
+    text-align: left;
+    color: var(--muted);
+    font-size: 13px;
+    width: 30%;
+  }
+  table.yn td.cell {
+    font-size: 24px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  table.yn td.cell.up { color: var(--green); }
+  table.yn td.cell.no { color: var(--red); }
+  table.yn tr.kalshi-row { background: rgba(88, 166, 255, 0.05); }
+  table.yn tr.conf-row td.cell {
+    font-size: 18px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .trade-summary {
+    text-align: center;
+    padding: 8px 0;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .trade-summary .dot { color: var(--muted); margin: 0 8px; }
+  .trade-summary .price { font-weight: 600; }
+
+  /* generic table used by logs */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  th, td {
+    text-align: right;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  th { color: var(--muted); font-weight: normal; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  th:first-child, td:first-child { text-align: left; }
+  td.dir-G { color: var(--green); }
+  td.dir-R { color: var(--red); }
+  td.dir-D { color: var(--muted); }
+  tr.live  { background: rgba(88, 166, 255, 0.07); }
+
+  footer {
+    padding: 10px 16px;
+    color: var(--muted);
+    font-size: 12px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>BTC 15-MIN MONITOR</h1>
+  <span class="pill" id="conn">connecting…</span>
+  <span class="pill" id="winInfo">window –</span>
+  <span class="pill" id="elapsed">0s / 900s</span>
+  <span class="pill" id="kalshiTicker" title="">Kalshi —</span>
+</header>
+
+<main>
+  <!-- Top hero row: UP bps + Last price side-by-side -->
+  <div class="hero">
+    <div class="hero-cell">
+      <div class="hero-label">UP (bps, this 15-min)</div>
+      <div class="hero-value" id="upPct">—</div>
+      <div class="hero-sub" id="upSub">(current − open) / open · 1 bp = 0.01 %</div>
+    </div>
+    <div class="hero-cell">
+      <div class="hero-label">Last price</div>
+      <div class="hero-value" id="lastPrice">—</div>
+      <div class="hero-sub" id="trendArrow">&nbsp;</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Per-window settlement log ──────────────────────────────────────────── -->
+<section class="logs">
+  <div class="panel">
+    <h2>
+      Window settlement history
+      <span class="hero-sub" style="font-size:11px;font-weight:normal;">
+        live rows use the thresholds active when the window settled  ·
+        <span style="color:var(--muted);">(replay)</span> rows were re-simulated
+        with the CURRENT thresholds (no historical record exists)
+      </span>
+    </h2>
+    <table>
+      <thead>
+        <tr>
+          <th>window ET</th>
+          <th>outcome</th>
+          <th>Δ bps</th>
+          <th title="Live rows: thresholds in effect at settle time. Replay rows: current thresholds applied retroactively.">K_yes / K_no / Δ_yes / Δ_no</th>
+          <th>trades</th>
+          <th>W / L</th>
+          <th>P&L</th>
+          <th title="Running sum of P&L from oldest visible window to this row.">Cum P&L</th>
+        </tr>
+      </thead>
+      <tbody id="windowPnLRows">
+        <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:14px;">
+          no settled windows yet…
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Hindsight parameter tuning ─────────────────────────────────────────── -->
+<section class="logs">
+  <div class="panel">
+    <h2>
+      Arb parameter tuning
+      <span class="hero-sub" style="font-size:11px;font-weight:normal;">
+        sweep: K_yes × K_no × Δ_yes × Δ_no  ·  hold-to-close P&L per share  ·  refreshes every 60s
+      </span>
+    </h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+      <div>
+        <div class="hero-label">LAST WINDOW</div>
+        <div id="optLast1" class="hero-sub" style="font-size:12px;margin-top:6px;line-height:1.7;">loading…</div>
+      </div>
+      <div>
+        <div class="hero-label">LAST 5 WINDOWS</div>
+        <div id="optLast5" class="hero-sub" style="font-size:12px;margin-top:6px;line-height:1.7;">loading…</div>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- BTC price over current 15-min window — dashed reference line at open px,
+     title shows live price and Δ from open. -->
+<section class="logs">
+  <div class="panel">
+    <h2 style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      BTC price · current 15-min window
+      <span id="btcWinTitleStats" style="font-size:12px;font-weight:normal;color:var(--muted);">
+        loading…
+      </span>
+    </h2>
+    <div id="btcWinChart" style="width:100%;height:300px;"></div>
+  </div>
+</section>
+
+<!-- YES probability chart (moved here so it sits just above the arb signals
+     table, with reference lines showing the currently-active K_yes /
+     1−K_no thresholds so you can see at a glance when arb fires). -->
+<section class="logs">
+  <div class="panel">
+    <h2 style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      YES probability over current window
+      <span style="font-size:12px;font-weight:normal;color:var(--muted);display:inline-flex;gap:14px;">
+        <label style="cursor:pointer;">
+          <input type="radio" name="chartMode" value="probs" checked
+                 style="vertical-align:middle;margin-right:4px;">
+          Probabilities
+        </label>
+        <label style="cursor:pointer;">
+          <input type="radio" name="chartMode" value="delta"
+                 style="vertical-align:middle;margin-right:4px;">
+          Delta (Model − Kalshi)
+        </label>
+      </span>
+      <span class="hero-sub" id="chartThresholdLine"
+            style="font-size:11px;font-weight:normal;margin-left:auto;">
+        active thresholds: loading…
+      </span>
+    </h2>
+    <div id="ynChart" style="width:100%;height:320px;"></div>
+    <div class="hero-sub" style="text-align:center; margin-top:6px;font-size:12px;">
+      Drag to zoom · double-click to reset · single-click legend entries to hide a series ·
+      chart resets at each new 15-min window
+    </div>
+  </div>
+</section>
+
+<section class="logs">
+  <div class="panel">
+    <h2>
+      Arb signals
+      <span class="hero-sub" id="arbRuleLine"
+            style="font-size:11px;font-weight:normal;">
+        loading active rule…
+      </span>
+    </h2>
+    <div id="arbSummary" class="hero-sub"
+         style="margin:8px 0 4px;font-size:12px;font-variant-numeric:tabular-nums;">
+      —
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>wall ET</th>
+          <th>sec</th>
+          <th>action</th>
+          <th title="Execution path: LIMIT = maker filled at bid · MARKET = market fallback after maker expired · DROP = book moved past cap · PAPER = paper mode (no real order)">fill</th>
+          <th>Δ (M − K)</th>
+          <th title="Model P on the traded side (P(YES) for BUY YES, P(NO) for BUY NO)">Model P</th>
+          <th title="Kalshi mid on the traded side">Kalshi mid</th>
+          <th title="Kalshi bid/ask on the traded side">bid / ask</th>
+          <th title="P&L assuming one share bought at entry ask. Mark-to-market (current bid − entry ask) during the window, settled ($1−ask or −ask) once the window closes.">P&L</th>
+        </tr>
+      </thead>
+      <tbody id="arbLogRows">
+        <tr><td colspan="9" style="text-align:center;color:var(--muted);padding:14px;">
+          no arb signals yet…
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</section>
+
+<!-- Kalshi vs Model price comparison — slim version of what used to be the
+     big probability panel. Sits below the arb signals so you can read off
+     the prices that drove the trades above. -->
+<section class="logs">
+  <div class="panel">
+    <h2>
+      Kalshi price · Model calculated price
+      <span class="hero-sub" style="font-size:11px;font-weight:normal;">
+        market quote vs the model's probability translated to a fair price
+      </span>
+    </h2>
+    <div class="prob-grid">
+      <div class="prob-cell">
+        <div class="prob-label">Kalshi P(UP)</div>
+        <div class="prob-value" id="kPUp">—</div>
+        <div class="prob-sub" id="kPUpSub">ask $— · bid $— · spread —¢</div>
+      </div>
+      <div class="prob-cell">
+        <div class="prob-label">Model P(UP) · calculated</div>
+        <div class="prob-value" id="mPUp">—</div>
+        <div class="prob-sub" id="mPUpSub">fair @ $— · 1/p = $—</div>
+      </div>
+
+      <div class="prob-cell">
+        <div class="prob-label">Kalshi P(DOWN)</div>
+        <div class="prob-value" id="kPNo">—</div>
+        <div class="prob-sub" id="kPNoSub">ask $— · bid $— · spread —¢</div>
+      </div>
+      <div class="prob-cell">
+        <div class="prob-label">Model P(DOWN) · calculated</div>
+        <div class="prob-value" id="mPNo">—</div>
+        <div class="prob-sub" id="mPNoSub">fair @ $— · 1/p = $—</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Single source: local prediction server at <code>ws://localhost:8000/ws/predictions</code>
+  (5 Hz). The server runs the Coinbase Advanced Trade WS + Kalshi WS + LightGBM
+  model and broadcasts the unified state to all subscribers.
+</footer>
+
+<!-- ── Plotly (used by both the YES-probability chart and the BTC candle chart) ── -->
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+
+<!-- ── Live monitor logic ────────────────────────────────────────────── -->
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const fmtUsd = n => "$" + n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtPct = n => (n >= 0 ? "+" : "") + n.toFixed(3) + "%";
+// Basis points: 1 bp = 0.01%. Input is in %-units (so 0.045% → 4.5 bps).
+const fmtBps = n => (n >= 0 ? "+" : "") + (n * 100).toFixed(1) + " bps";
+// ─── Time formatters — Eastern Time (auto-handles EDT/EST DST shift) ───
+// Browser's Intl is reliable for America/New_York. Use 'en-GB' for 24h.
+const _ET_HM   = new Intl.DateTimeFormat('en-GB', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', hour12:false});
+const _ET_HMS  = new Intl.DateTimeFormat('en-GB', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+const fmtTimeET    = ms => _ET_HMS.format(new Date(ms));   // "HH:MM:SS" ET
+const fmtTimeShortET = ms => _ET_HM.format(new Date(ms)); // "HH:MM" ET
+// Backward-compat alias used widely below.
+const fmtTime = fmtTimeET;
+// ISO-like string in ET (no Z) for Plotly time axes — makes the chart
+// render in ET as if it were local time, without timezone math gymnastics.
+function isoAsET(ms) {
+  // 'sv-SE' locale yields ISO-ish "YYYY-MM-DD HH:MM:SS"
+  const s = new Intl.DateTimeFormat('sv-SE', {
+    timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false,
+  }).format(new Date(ms));
+  return s.replace(' ', 'T');
+}
+
+function floorTo(ms, periodMs) { return Math.floor(ms / periodMs) * periodMs; }
+const MIN_MS = 60_000;
+const WIN_MS = 15 * MIN_MS;
+
+// State cache. All fields are populated from the prediction-server feed —
+// the browser does NOT open its own Coinbase WS. The server is the single
+// source of truth for prices, window OHLC, volume, flow split, trade count,
+// and model output. The only thing the browser computes locally is the
+// up/down-tick arrow (by comparing consecutive `current_price` messages).
+const state = {
+  windowOpenTs:  null,  // ms
+  windowOpenPx:  null,
+  windowHigh:    null,
+  windowLow:     null,
+  windowVol:     0,
+  windowBuyVol:  0,
+  windowSellVol: 0,
+  windowTrades:  0,
+  currentPrice:  null,
+  lastTrendUp:   null,
+};
+
+function applyServerState(p) {
+  if (p.window_open_px    != null) state.windowOpenPx = Number(p.window_open_px);
+  if (p.window_high       != null) state.windowHigh   = Number(p.window_high);
+  if (p.window_low        != null) state.windowLow    = Number(p.window_low);
+  if (p.window_open_ts    != null) state.windowOpenTs = Number(p.window_open_ts) * 1000;
+  if (p.window_volume     != null) state.windowVol      = Number(p.window_volume);
+  if (p.window_buy_vol    != null) state.windowBuyVol   = Number(p.window_buy_vol);
+  if (p.window_sell_vol   != null) state.windowSellVol  = Number(p.window_sell_vol);
+  if (p.window_trade_count!= null) state.windowTrades   = Number(p.window_trade_count);
+  if (p.current_price     != null) {
+    const newPx = Number(p.current_price);
+    if (state.currentPrice !== null && newPx !== state.currentPrice) {
+      state.lastTrendUp = newPx > state.currentPrice;
+    }
+    state.currentPrice = newPx;
+  }
+}
+
+function render() {
+  if (state.windowOpenPx == null || state.currentPrice == null) return;
+
+  const upPct = (state.currentPrice - state.windowOpenPx) / state.windowOpenPx * 100;
+  const upEl = $("upPct");
+  upEl.textContent = fmtBps(upPct);
+  upEl.classList.toggle("green", upPct > 0);
+  upEl.classList.toggle("red",   upPct < 0);
+
+  const priceEl = $("lastPrice");
+  priceEl.textContent = fmtUsd(state.currentPrice);
+  priceEl.classList.toggle("green", state.lastTrendUp === true);
+  priceEl.classList.toggle("red",   state.lastTrendUp === false);
+
+  $("trendArrow").textContent = state.lastTrendUp === true ? "▲ uptick"
+                              : state.lastTrendUp === false ? "▼ downtick"
+                              : "";
+
+  $("winInfo").textContent  = "window " + fmtTime(state.windowOpenTs) + "–" + fmtTime(state.windowOpenTs + WIN_MS) + " ET";
+}
+
+// ─── elapsed timer ─────────────────────────────────────────────────────
+setInterval(() => {
+  if (!state.windowOpenTs) return;
+  const sec = Math.max(0, Math.min(900, Math.floor((Date.now() - state.windowOpenTs) / 1000)));
+  $("elapsed").textContent = `${sec}s / 900s`;
+}, 250);
+
+function setConn(label, cls) {
+  const el = $("conn");
+  el.textContent = label;
+  el.className = "pill " + cls;
+}
+
+// ─── Local prediction server WS ─────────────────────────────────────────
+const predUrl = (() => {
+  if (location.protocol === "file:") return "ws://localhost:8000/ws/predictions";
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws/predictions`;
+})();
+
+let predWs = null, predDelay = 1000;
+
+function connectPred() {
+  setConn("connecting…", "connecting");
+  try {
+    predWs = new WebSocket(predUrl);
+  } catch (e) {
+    setConn("server down", "dead");
+    setTimeout(connectPred, predDelay);
+    predDelay = Math.min(predDelay * 2, 15000);
+    return;
+  }
+
+  predWs.onopen = () => {
+    predDelay = 1000;
+    setConn("live", "live");
+  };
+
+  predWs.onmessage = (e) => {
+    let msg; try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg && msg.type === "history" && Array.isArray(msg.points)) {
+      applyHistory(msg.points);
+      return;
+    }
+    renderPrediction(msg);
+  };
+
+  predWs.onerror = () => {/* surfaced via onclose */};
+  predWs.onclose = () => {
+    setConn("disconnected", "dead");
+    setTimeout(connectPred, predDelay);
+    predDelay = Math.min(predDelay * 2, 15000);
+  };
+}
+
+// Translate model output into Kalshi-trading terms.
+// P(green) is treated as P(YES wins). So:
+//   p_green > 0.5  →  BUY YES   (model expects YES contract to pay out)
+//   p_green < 0.5  →  SELL YES  (model expects NO; sell YES short / buy NO)
+// `winnerPct` is the probability of the side you'd be on.
+// Strength is derived from |P(YES) − 0.5| alone — no time-weighted wrapper.
+// (Time-into-candle is already a feature the model trained on, so adding a
+// time discount here would double-count it.)
+function interpretSignal(p_green) {
+  const isBuyYes = p_green > 0.5;
+  const action = isBuyYes ? "BUY YES" : "SELL YES";
+  const winnerPct = (isBuyYes ? p_green : 1 - p_green) * 100;
+  const ss = Math.abs(p_green - 0.5) * 2;   // signal_strength
+  let prefix;
+  if      (ss < 0.10) prefix = "weak ";
+  else if (ss < 0.30) prefix = "lean ";
+  else if (ss < 0.60) prefix = "";
+  else if (ss < 0.90) prefix = "strong ";
+  else                prefix = "MAX ";
+  return {
+    action,
+    isBuyYes,
+    winnerPct,
+    label: `${prefix}${action} ${winnerPct.toFixed(0)}%`,
+  };
+}
+
+// Bulk-paint the chart from a server-sent history of 1-Hz predictions for
+// the current 15-min window — used when the page joins mid-window so the
+// chart isn't empty until the next 15-min boundary.
+// History payload is intentionally slim (just chart-essential fields). The
+// full per-candle state (features, SHAP, action tile, etc.) will populate
+// from the very next live message — no renderPrediction here.
+function applyHistory(points) {
+  if (!points || !points.length) return;
+  for (const p of points) { chartAppend(p); btcWinAppend(p); }
+}
+
+function renderPrediction(p) {
+  applyServerState(p);
+  render();
+
+  const pg = Number(p.p_green);
+  const pNo = 1 - pg;
+  const k = p.kalshi || {};
+  const kYes = k.yes_mid != null ? Number(k.yes_mid) : null;
+  const kNo  = kYes !== null ? 1 - kYes : null;
+
+  // ── YES/NO comparison table ──────────────────────────────────────────
+  // ── Model probabilities + "fair @ $X · 1/p = $Y" sub-line ───────────
+  $("mPUp").textContent = (pg  * 100).toFixed(1) + "%";
+  $("mPNo").textContent = (pNo * 100).toFixed(1) + "%";
+  const inv = x => isFinite(x) && x > 0 ? (1 / x) : NaN;
+  $("mPUpSub").textContent = `fair @ $${pg.toFixed(3)} · 1/p = $${inv(pg).toFixed(2)}`;
+  $("mPNoSub").textContent = `fair @ $${pNo.toFixed(3)} · 1/p = $${inv(pNo).toFixed(2)}`;
+
+  // ── Kalshi probabilities + "ask $X · bid $Y · spread Z¢" sub-line ────
+  if (kYes !== null) {
+    $("kPUp").textContent = (kYes * 100).toFixed(1) + "%";
+    $("kPNo").textContent = (kNo  * 100).toFixed(1) + "%";
+    const yb = Number(k.yes_bid), ya = Number(k.yes_ask);
+    const nb = +(1 - ya).toFixed(3), na = +(1 - yb).toFixed(3);
+    const ySpread = ((ya - yb) * 100).toFixed(1);
+    const nSpread = ((na - nb) * 100).toFixed(1);
+    $("kPUpSub").textContent = `ask $${ya.toFixed(3)} · bid $${yb.toFixed(3)} · spread ${ySpread}¢`;
+    $("kPNoSub").textContent = `ask $${na.toFixed(3)} · bid $${nb.toFixed(3)} · spread ${nSpread}¢`;
+  } else {
+    $("kPUp").textContent = "—"; $("kPNo").textContent = "—";
+    $("kPUpSub").textContent = "ask $— · bid $— · spread —¢";
+    $("kPNoSub").textContent = "ask $— · bid $— · spread —¢";
+  }
+
+  renderKalshi(p);
+  renderCandleMeta(p);
+  renderArbRuleLine(p);
+  chartAppend(p);
+  btcWinAppend(p);
+  updateThresholdLines(p.arb_thresholds);
+  renderArbLog(p);
+}
+
+// Render the live-thresholds line in the arb panel header. Updates each
+// tick (cheap), so when the server auto-tunes, the dashboard reflects it
+// immediately.
+function renderArbRuleLine(p) {
+  const el = $("arbRuleLine");
+  if (!el) return;
+  const th = p.arb_thresholds;
+  if (!th) {
+    el.textContent = "loading active rule…";
+    return;
+  }
+  const dyPP = (th.d_yes * 100).toFixed(0);
+  const dnPP = (th.d_no  * 100).toFixed(0);
+  el.innerHTML = `
+    BUY YES: (Model − Kalshi)<sub>YES</sub> &gt; ${dyPP} pp AND Kalshi P(YES) &gt; ${th.k_yes.toFixed(2)}
+    &nbsp;·&nbsp;
+    BUY NO: (Model − Kalshi)<sub>NO</sub> &gt; ${dnPP} pp AND Kalshi P(NO) &gt; ${th.k_no.toFixed(2)}
+    &nbsp;·&nbsp; gated for first 30s · all trades in current 15-min window · prices for the traded side
+  `;
+}
+
+// ─── Per-candle feature snapshot ───────────────────────────────────────
+// What the model is actually conditioning on for THIS candle: position,
+// flow, sub-minute sequence, context. Updates every prediction tick.
+const SESSION_NAMES = ["Dead", "Asia", "London", "US", "US-PM"];
+const DAY_NAMES     = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// Short display names for the SHAP drivers row.
+const FEATURE_SHORT = {
+  body_pct: "body", body_time_product: "body×t", time_fraction: "time_frac",
+  running_range_pct: "range", price_position_in_range: "price_in_range",
+  upper_wick_pct: "↑wick", lower_wick_pct: "↓wick",
+  volume_pace: "vol_pace",
+  flow_imbalance_30s: "flow_30s", flow_imbalance_60s: "flow_60s", flow_imbalance_300s: "flow_5m",
+  trade_rate_ratio: "trade_rate",
+  consecutive_1min_run: "consec_run", green_ratio: "green_ratio", avg_1min_body: "avg_sub_body",
+  session_bucket: "session", day_of_week: "day", is_weekend: "weekend",
+  prior_direction: "prior_dir", prior_body_pct: "prior_body", prior_range_pct: "prior_range",
+  flow_short_long_alignment: "flow_align", flow_momentum: "flow_mom",
+  body_acceleration: "body_acc", wick_asymmetry: "wick_asym",
+  range_consumed_ratio: "range_used", late_candle_flag: "late_flag", early_candle_flag: "early_flag",
+  sample_sec: "sample_sec",
+};
+
+function renderCandleMeta(p) {
+  const el = $("candleMeta");
+  if (!el) return;                  // panel removed from DOM — no-op
+  const f = p && p.features;
+  if (!f) {
+    el.innerHTML = `<span class="lbl">candle:</span> waiting…`;
+    return;
+  }
+  const colourBps = v => `<span class="${v > 0 ? 'g' : v < 0 ? 'r' : 'd'}">${(v >= 0 ? '+' : '') + v.toFixed(1)}bps</span>`;
+  const colourSign = v => `<span class="${v > 0 ? 'g' : v < 0 ? 'r' : 'd'}">${(v >= 0 ? '+' : '') + v.toFixed(2)}</span>`;
+  const colourInt  = v => `<span class="${v > 0 ? 'g' : v < 0 ? 'r' : 'd'}">${(v >= 0 ? '+' : '') + v}</span>`;
+  const arrow      = v => v > 0 ? "↑" : v < 0 ? "↓" : "→";
+  const session    = SESSION_NAMES[f.session_bucket] ?? "?";
+  const day        = DAY_NAMES[f.day_of_week] ?? "?";
+  const weekend    = f.is_weekend ? "weekend" : "weekday";
+  const inRange    = (f.price_position_in_range * 100).toFixed(0);
+  const greenPct   = (f.green_ratio * 100).toFixed(0);
+
+  el.innerHTML = `
+    <div class="row">
+      <span class="lbl">position</span>
+      body ${colourBps(f.body_bps)} ·
+      range ${f.range_bps.toFixed(1)}bps ·
+      in-range ${inRange}% ·
+      ↑wick ${f.upper_wick_bps.toFixed(1)}bps ·
+      ↓wick ${f.lower_wick_bps.toFixed(1)}bps
+    </div>
+    <div class="row">
+      <span class="lbl">flow</span>
+      30s ${colourSign(f.flow_30s)} ·
+      60s ${colourSign(f.flow_60s)} ·
+      5m ${colourSign(f.flow_300s)} ·
+      vol_pace ${f.volume_pace.toFixed(2)}× ·
+      trade_rate ${f.trade_rate_ratio.toFixed(2)}×
+    </div>
+    <div class="row">
+      <span class="lbl">sequence</span>
+      consec_run ${colourInt(f.consecutive_1min_run)} ·
+      green ${greenPct}% of completed 1-min sub-candles ·
+      avg sub-body ${f.avg_1min_body_bps.toFixed(2)}bps
+    </div>
+    <div class="row">
+      <span class="lbl">context</span>
+      ${session} session · ${day} (${weekend}) ·
+      prior 15m ${colourBps(f.prior_body_bps)} ${arrow(f.prior_direction)} ·
+      prior range ${f.prior_range_bps.toFixed(1)}bps
+    </div>
+    ${renderShapRows(p.shap)}
+  `;
+}
+
+// Render two rows of SHAP-style drivers: features pushing UP (positive
+// log-odds contribution) and features pushing DOWN (negative).
+function renderShapRows(shap) {
+  if (!shap || !shap.top) return "";
+  const ups   = shap.top.filter(d => d.shap > 0).slice(0, 4);
+  const downs = shap.top.filter(d => d.shap < 0).slice(0, 4);
+  const fmtVal = v => v == null ? "" : (typeof v === "number"
+    ? (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(3))
+    : v);
+  const upStr = ups.length
+    ? ups.map(d => `${FEATURE_SHORT[d.name] || d.name}=${fmtVal(d.value)} <span class="g">+${d.shap.toFixed(2)}</span>`).join(" · ")
+    : "<span class='d'>—</span>";
+  const dnStr = downs.length
+    ? downs.map(d => `${FEATURE_SHORT[d.name] || d.name}=${fmtVal(d.value)} <span class="r">${d.shap.toFixed(2)}</span>`).join(" · ")
+    : "<span class='d'>—</span>";
+  return `
+    <div class="row" style="margin-top:6px;border-top:1px dashed var(--border);padding-top:4px;">
+      <span class="lbl">↑ pushers</span>${upStr}
+    </div>
+    <div class="row">
+      <span class="lbl">↓ pushers</span>${dnStr}
+    </div>
+  `;
+}
+
+// ─── YES-probability chart (Plotly — Kalshi vs Model over current window) ──
+//
+// Two view modes, toggled by the radio buttons above the chart:
+//   "probs"  — Kalshi YES mid (blue) + Model P(YES) (green), y-axis 0–100%, ref line at 50%
+//   "delta"  — Model − Kalshi (amber, filled to zero), y-axis ±50pp, ref line at 0
+//
+// Three traces are pre-defined; toggling sets their `visible` flags.
+//
+const chartSeries = {
+  windowOpenTs: null,
+  data: [],   // [{sec, model_p, kalshi_p|null, delta|null}]
+};
+let chartInitialized = false;
+let chartMode = "probs";
+
+const CHART_LAYOUT = {
+  paper_bgcolor: "#161b22",
+  plot_bgcolor:  "#0e1116",
+  font: { color: "#e6edf3", size: 11, family: "ui-monospace, SFMono-Regular, Menlo, monospace" },
+  margin: { l: 60, r: 20, t: 10, b: 60 },
+  hovermode: "x unified",
+  xaxis: {
+    title:  { text: "seconds into 15-min window", font: { size: 11 } },
+    range:  [0, 900],
+    gridcolor: "#23272d",
+    zerolinecolor: "#30363d",
+    tickvals: [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 780, 840, 900],
+  },
+  yaxis: {
+    title: { text: "P(YES)", font: { size: 11 } },
+    range: [0, 1],
+    tickformat: ".0%",
+    gridcolor: "#23272d",
+    zerolinecolor: "#30363d",
+  },
+  legend: { orientation: "h", y: -0.22, x: 0.5, xanchor: "center" },
+  shapes: [
+    // 0: 50% midline (toggles to y=0 in delta mode via applyChartMode)
+    { type: "line", x0: 0, x1: 900, xref: "x",
+      y0: 0.5, y1: 0.5, yref: "y",
+      line: { color: "#5b6470", width: 1, dash: "dash" } },
+    // 1: K_yes threshold — BUY YES fires when YES_mid crosses above this.
+    //    y values get rewritten by updateThresholdLines() on every tick.
+    { type: "line", x0: 0, x1: 900, xref: "x",
+      y0: 0,   y1: 0,   yref: "y",
+      line: { color: "#3fb950", width: 1, dash: "dot" } },
+    // 2: 1 − K_no threshold — BUY NO fires when YES_mid crosses below this
+    //    (equivalent to NO_mid > K_no). On the P(YES) axis, that's 1 − K_no.
+    { type: "line", x0: 0, x1: 900, xref: "x",
+      y0: 1,   y1: 1,   yref: "y",
+      line: { color: "#f87171", width: 1, dash: "dot" } },
+  ],
+};
+
+const CHART_CONFIG = {
+  responsive: true,
+  displaylogo: false,
+  modeBarButtonsToRemove: [
+    "lasso2d", "select2d", "autoScale2d",
+    "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian",
+  ],
+  toImageButtonOptions: { filename: "yes-probability", format: "png" },
+};
+
+function ensureChartInit() {
+  if (chartInitialized || !window.Plotly) return;
+  Plotly.newPlot("ynChart", [
+    {
+      x: [], y: [],
+      name: "Kalshi YES mid",
+      type: "scatter", mode: "lines+markers",
+      line:   { color: "#58a6ff", width: 2 },
+      marker: { size: 4, color: "#58a6ff" },
+      hovertemplate: "Kalshi: %{y:.1%}<extra></extra>",
+      visible: true,
+    },
+    {
+      x: [], y: [],
+      name: "Model P(YES)",
+      type: "scatter", mode: "lines+markers",
+      line:   { color: "#3fb950", width: 2 },
+      marker: { size: 4, color: "#3fb950" },
+      hovertemplate: "Model: %{y:.1%}<extra></extra>",
+      visible: true,
+    },
+    {
+      x: [], y: [],
+      name: "Δ Model − Kalshi",
+      type: "scatter", mode: "lines+markers",
+      line:   { color: "#d29922", width: 2 },
+      marker: { size: 4, color: "#d29922" },
+      fill: "tozeroy",
+      fillcolor: "rgba(210, 153, 34, 0.18)",
+      hovertemplate: "Δ: %{y:+.1%}<extra></extra>",
+      visible: false,
+    },
+    // 3: BUY YES clusters — green up-triangle, size scales with run length.
+    {
+      x: [], y: [], text: [], marker: { size: [], symbol: "triangle-up",
+                                        color: "#3fb950",
+                                        line: { color: "#0a4a1f", width: 1 } },
+      name: "BUY YES (run)",
+      type: "scatter", mode: "markers",
+      hovertemplate: "%{text}<extra></extra>",
+      visible: true,
+      showlegend: true,
+    },
+    // 4: BUY NO clusters — red down-triangle, plotted at (1 − avg entry) so
+    //    it sits on the P(YES) axis where the market was offering.
+    {
+      x: [], y: [], text: [], marker: { size: [], symbol: "triangle-down",
+                                        color: "#f87171",
+                                        line: { color: "#4a0d0d", width: 1 } },
+      name: "BUY NO (run)",
+      type: "scatter", mode: "markers",
+      hovertemplate: "%{text}<extra></extra>",
+      visible: true,
+      showlegend: true,
+    },
+  ], CHART_LAYOUT, CHART_CONFIG);
+  chartInitialized = true;
+}
+
+function applyChartMode() {
+  if (!chartInitialized || !window.Plotly) return;
+  // Trace order: [Kalshi, Model, Δ, BUY YES clusters, BUY NO clusters]
+  if (chartMode === "delta") {
+    Plotly.restyle("ynChart", { visible: [false, false, true, false, false] });
+    Plotly.relayout("ynChart", {
+      "yaxis.range":      [-0.60, 0.60],
+      "yaxis.title.text": "Δ = Model − Kalshi (pp)",
+      "yaxis.tickformat": "+.0%",
+      "shapes[0].y0":     0,
+      "shapes[0].y1":     0,
+      "shapes[1].visible": false,
+      "shapes[2].visible": false,
+    });
+  } else {
+    Plotly.restyle("ynChart", { visible: [true, true, false, true, true] });
+    Plotly.relayout("ynChart", {
+      "yaxis.range":      [0, 1],
+      "yaxis.title.text": "P(YES)",
+      "yaxis.tickformat": ".0%",
+      "shapes[0].y0":     0.5,
+      "shapes[0].y1":     0.5,
+      "shapes[1].visible": true,
+      "shapes[2].visible": true,
+    });
+  }
+}
+
+// Repositions the K_yes / (1 − K_no) reference lines whenever the
+// server-side auto-tuner updates the active thresholds. Also paints a
+// small label next to the chart title.
+// Skip work when thresholds haven't changed — auto-tune retunes only on
+// window roll (every 15 min), so 99.9% of WS ticks hit the same values.
+let _lastThKey = "";
+function updateThresholdLines(th) {
+  if (!chartInitialized || !window.Plotly || !th) return;
+  const kYes = Number(th.k_yes);
+  const kNo  = Number(th.k_no);
+  if (!isFinite(kYes) || !isFinite(kNo)) return;
+  const key = `${kYes}|${kNo}|${th.d_yes}|${th.d_no}`;
+  if (key === _lastThKey) return;
+  _lastThKey = key;
+  Plotly.relayout("ynChart", {
+    "shapes[1].y0": kYes,       "shapes[1].y1": kYes,
+    "shapes[2].y0": 1 - kNo,    "shapes[2].y1": 1 - kNo,
+  });
+  const el = $("chartThresholdLine");
+  if (el) {
+    const dy = (Number(th.d_yes) * 100).toFixed(0);
+    const dn = (Number(th.d_no)  * 100).toFixed(0);
+    el.innerHTML =
+      `<span style="color:#3fb950;">━━</span> BUY YES @ P(YES) > ${kYes.toFixed(2)} (+${dy}pp edge)` +
+      ` &nbsp;·&nbsp; ` +
+      `<span style="color:#f87171;">━━</span> BUY NO @ P(YES) < ${(1-kNo).toFixed(2)} (+${dn}pp edge)`;
+  }
+}
+
+// Wire up the toggle radios once the DOM is parsed.
+document.querySelectorAll('input[name="chartMode"]').forEach(el => {
+  el.addEventListener("change", e => {
+    chartMode = e.target.value;
+    applyChartMode();
+  });
+});
+
+// ─── Trade-run clustering (avoids chart clutter) ──────────────────────
+// Server fires arb trades every ARB_THROTTLE_SEC (3s) while conditions
+// hold, so a single "opportunity" produces a continuous run of trades.
+// Group consecutive same-side trades whose sample_sec gap is ≤ CLUSTER_GAP_SEC
+// into one chart marker. Marker size scales with run length so visual
+// weight reflects how many trades fired.
+const CLUSTER_GAP_SEC = 8;   // gap > 8s = new cluster (3s throttle + slack)
+
+function clusterTrades(trades) {
+  const clusters = [];
+  for (const t of trades || []) {
+    const last = clusters[clusters.length - 1];
+    if (last
+        && last.direction === t.direction
+        && t.sample_sec - last.last_sec <= CLUSTER_GAP_SEC) {
+      last.trades.push(t);
+      last.last_sec = t.sample_sec;
+    } else {
+      clusters.push({ direction: t.direction, trades: [t],
+                      first_sec: t.sample_sec, last_sec: t.sample_sec });
+    }
+  }
+  return clusters;
+}
+
+// Map cluster size → marker pixel size. Log scaling so a 30-trade run
+// reads as roughly "twice the weight" of a 3-trade run without becoming
+// a giant blob.
+function clusterMarkerSize(n) {
+  return Math.round(Math.max(10, Math.min(30, 8 + Math.log2(n + 1) * 4.5)));
+}
+
+// Cheap dirty key so we only repaint cluster markers when a new trade
+// actually fires (every ~3 s under the server's throttle) — not on every
+// 5 Hz WS tick. Big cost reduction in DOM/plotly work.
+let _lastClusterKey = "";
+
+function refreshArbClusters(arbWindow) {
+  if (!chartInitialized || !window.Plotly) return;
+  const trades = (arbWindow && arbWindow.trades) || [];
+  const key = `${arbWindow ? arbWindow.window_open_ts : ""}-${trades.length}`;
+  if (key === _lastClusterKey) return;
+  _lastClusterKey = key;
+  if (!trades.length) {
+    Plotly.restyle("ynChart", { x: [[],[]], y: [[],[]], text: [[],[]],
+                                "marker.size": [[],[]] }, [3, 4]);
+    return;
+  }
+  const clusters = clusterTrades(trades);
+  const yesX = [], yesY = [], yesT = [], yesSize = [];
+  const noX  = [], noY  = [], noT  = [], noSize  = [];
+  const isBuyYes = c => c.direction === "BUY YES";
+  for (const c of clusters) {
+    const n = c.trades.length;
+    const avgEntry = c.trades.reduce((a, t) => a + Number(t.entry_ask), 0) / n;
+    const totalPnl = c.trades.reduce((a, t) => a + Number(t.pnl || 0), 0);
+    const won  = c.trades.filter(t => t.status === "won").length;
+    const lost = c.trades.filter(t => t.status === "lost").length;
+    const live = c.trades.filter(t => t.status === "live").length;
+    // X position = midpoint of the run, Y = avg entry (or 1 − avg entry for NO).
+    const xMid = (c.first_sec + c.last_sec) / 2;
+    const y = isBuyYes(c) ? avgEntry : (1 - avgEntry);
+    const sign = totalPnl >= 0 ? "+" : "−";
+    const pnlTxt = sign + "$" + Math.abs(totalPnl).toFixed(3);
+    const span = c.first_sec === c.last_sec
+                ? `T+${c.first_sec}s`
+                : `T+${c.first_sec}s–${c.last_sec}s`;
+    const wlTxt = live > 0
+      ? `${won}W / ${lost}L · ${live} live`
+      : `${won}W / ${lost}L`;
+    const tip = `${c.direction} run (n=${n}) · ${span}<br>`
+              + `avg entry $${avgEntry.toFixed(3)} · ${wlTxt}<br>`
+              + `cluster P&L ${pnlTxt}`;
+    if (isBuyYes(c)) {
+      yesX.push(xMid); yesY.push(y); yesT.push(tip); yesSize.push(clusterMarkerSize(n));
+    } else {
+      noX.push(xMid);  noY.push(y);  noT.push(tip);  noSize.push(clusterMarkerSize(n));
+    }
+  }
+  // Plotly wants per-trace arrays for restyle.
+  Plotly.restyle("ynChart", {
+    x:               [yesX, noX],
+    y:               [yesY, noY],
+    text:            [yesT, noT],
+    "marker.size":   [yesSize, noSize],
+  }, [3, 4]);
+}
+
+function chartAppend(p) {
+  const wTs = Number(p.window_open_ts);
+  const windowChanged = chartSeries.windowOpenTs !== wTs;
+  if (windowChanged) {
+    chartSeries.windowOpenTs = wTs;
+    chartSeries.data = [];
+    if (chartInitialized && window.Plotly) {
+      // Reset all 5 traces; cluster traces also clear here.
+      Plotly.restyle("ynChart", { x: [[],[],[],[],[]], y: [[],[],[],[],[]] });
+      applyChartMode();
+      Plotly.relayout("ynChart", { "xaxis.range": [0, 900] });
+    }
+  }
+
+  const sec  = Number(p.sample_sec);
+  const m_py = Number(p.p_green);
+  const k_py = p.kalshi && p.kalshi.yes_mid != null ? Number(p.kalshi.yes_mid) : null;
+  const delta = k_py !== null ? (m_py - k_py) : null;
+  const last = chartSeries.data[chartSeries.data.length - 1];
+
+  ensureChartInit();
+  applyChartMode();
+  if (!chartInitialized || !window.Plotly) return;
+
+  // Only touch the chart on actual sec boundaries — the publisher fires
+  // 5 Hz but sample_sec only advances once per second, so 4 of every 5
+  // ticks within the same second would have re-rendered identical data.
+  // Update the in-memory tail in place but skip the Plotly call until sec
+  // moves; saves ~4×/sec of full-array restyle.
+  if (!last || sec !== last.sec) {
+    chartSeries.data.push({ sec, model_p: m_py, kalshi_p: k_py, delta });
+    Plotly.extendTraces("ynChart", {
+      x: [[sec], [sec], [sec]],
+      y: [[k_py], [m_py], [delta]],
+    }, [0, 1, 2]);
+  } else {
+    last.model_p  = m_py;
+    last.kalshi_p = k_py;
+    last.delta    = delta;
+    // No restyle — identical sec, next sec-advance will pick up the latest.
+  }
+
+  // Refresh the BUY YES / BUY NO cluster markers from p.arb_window.
+  // Internally dirty-checks; only repaints when trade count changes.
+  refreshArbClusters(p.arb_window);
+}
+
+// ─── Kalshi ticker pill in the header ───────────────────────────────────
+function renderKalshi(p) {
+  const k = p.kalshi || {};
+  const el = $("kalshiTicker");
+  if (!el) return;
+
+  const ticker = k.ticker || (k.available === false ? "auth unavailable" : "—");
+  el.textContent = `Kalshi ${ticker}`;
+
+  // Build a hover-tooltip with strike + current bid/ask for context.
+  const parts = [`Kalshi market: ${ticker}`];
+  const strike = formatStrike(k);
+  if (strike !== "—") parts.push(`Strike: ${strike}`);
+  if (k.yes_bid != null && k.yes_ask != null) {
+    parts.push(`YES bid/ask: ${Number(k.yes_bid).toFixed(3)} / ${Number(k.yes_ask).toFixed(3)}`);
+  }
+  parts.push("Kalshi YES pays $1 if BTC closes at-or-above strike by window end.");
+  el.setAttribute("title", parts.join("\n"));
+}
+
+function formatStrike(k) {
+  if (k.floor_strike == null && k.cap_strike == null) return "—";
+  const fs = k.floor_strike;
+  const cs = k.cap_strike;
+  const t = k.strike_type || "";
+  if (t === "between" && fs != null && cs != null) {
+    return `$${fmtNumber(fs)} – $${fmtNumber(cs)} (between)`;
+  }
+  if (t === "above" && fs != null) return `≥ $${fmtNumber(fs)} (above)`;
+  if (t === "below" && cs != null) return `≤ $${fmtNumber(cs)} (below)`;
+  if (fs != null) return `$${fmtNumber(fs)} (${t || "?"})`;
+  if (cs != null) return `$${fmtNumber(cs)} (${t || "?"})`;
+  return "—";
+}
+function fmtNumber(n) { return Number(n).toLocaleString(undefined, {maximumFractionDigits: 0}); }
+
+// ─── Arb signal panel ───────────────────────────────────────────────────
+// Pure renderer. All decision logic (throttle, append, mark-to-market,
+// settlement) lives server-side in ArbTradeTracker; we just paint
+// whatever p.arb_window contains.
+// Skip the full table+summary rebuild on most WS ticks — only when the
+// trade count or status mix actually changes. The pnl on existing rows
+// drifts every tick (mark-to-market) but rebuilding the entire DOM 5×/sec
+// to reflect a few cents of drift is the dominant perf cost in this page.
+let _lastArbLogKey = "";
+function renderArbLog(p) {
+  const tbody = $("arbLogRows");
+  const sumEl = $("arbSummary");
+  const w = (p && p.arb_window) || null;
+  const trades = (w && w.trades) || [];
+
+  // Key includes trade count + W/L counts (live → settled flips change W/L
+  // even when count stays). Tooltip P&L drift is lost; cell text stays as
+  // of the last trade event, which is fine for the 3-second granularity.
+  const key = w
+    ? `${w.window_open_ts}-${w.n}-${w.won}-${w.lost}-${w.live}`
+    : "";
+  if (key === _lastArbLogKey) return;
+  _lastArbLogKey = key;
+
+  if (!w || trades.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:14px;">no arb signals yet this window…</td></tr>`;
+    if (sumEl) sumEl.innerHTML = `<span class="lbl" style="color:var(--muted);">no arb data yet…</span>`;
+    return;
+  }
+
+  const cls  = v => v > 0 ? "dir-G" : v < 0 ? "dir-R" : "dir-D";
+  const sign = v => v >= 0 ? `+$${v.toFixed(3)}` : `−$${Math.abs(v).toFixed(3)}`;
+
+  if (sumEl) {
+    const hhmm = w.window_open_ts != null
+      ? fmtTimeShortET(Number(w.window_open_ts) * 1000) + " ET"
+      : "—";
+    const fmt2 = v => v == null ? "—" : `$${Number(v).toFixed(3)}`;
+    const yes = w.buy_yes || {n:0,won:0,lost:0,live:0,avg_entry:null,pnl:0};
+    const no  = w.buy_no  || {n:0,won:0,lost:0,live:0,avg_entry:null,pnl:0};
+    sumEl.innerHTML = `
+      <div style="display:flex;gap:18px;align-items:center;padding:6px 8px;background:rgba(88,166,255,0.06);border-radius:4px;">
+        <span class="lbl" style="color:var(--accent);font-weight:600;">${hhmm} (live)</span>
+        <span><span class="lbl" style="color:var(--muted);">trades</span> <b>${w.n}</b></span>
+        <span><span class="lbl" style="color:var(--muted);">wins</span>   <b class="dir-G">${w.won}</b></span>
+        <span><span class="lbl" style="color:var(--muted);">losses</span> <b class="dir-R">${w.lost}</b></span>
+        <span><span class="lbl" style="color:var(--muted);">live</span>   <b class="dir-D">${w.live}</b></span>
+        <span style="margin-left:auto;">
+          <span class="lbl" style="color:var(--muted);">net P&L</span>
+          <b class="${cls(w.total_pnl)}">${sign(w.total_pnl)}</b>
+        </span>
+      </div>
+      <div style="display:flex;gap:24px;align-items:center;padding:6px 8px;margin-top:4px;font-size:11px;">
+        <span style="display:flex;gap:10px;align-items:center;padding:4px 10px;background:rgba(63,185,80,0.08);border-left:3px solid #3fb950;border-radius:3px;">
+          <b class="dir-G">BUY YES</b>
+          <span><span class="lbl" style="color:var(--muted);">n</span> <b>${yes.n}</b></span>
+          <span><span class="lbl" style="color:var(--muted);">W/L/live</span>
+                <b class="dir-G">${yes.won}</b>/<b class="dir-R">${yes.lost}</b>/<b class="dir-D">${yes.live}</b></span>
+          <span><span class="lbl" style="color:var(--muted);">avg entry</span> <b>${fmt2(yes.avg_entry)}</b></span>
+          <span><span class="lbl" style="color:var(--muted);">P&L</span> <b class="${cls(yes.pnl)}">${sign(yes.pnl)}</b></span>
+        </span>
+        <span style="display:flex;gap:10px;align-items:center;padding:4px 10px;background:rgba(248,113,113,0.08);border-left:3px solid #f87171;border-radius:3px;">
+          <b class="dir-R">BUY NO</b>
+          <span><span class="lbl" style="color:var(--muted);">n</span> <b>${no.n}</b></span>
+          <span><span class="lbl" style="color:var(--muted);">W/L/live</span>
+                <b class="dir-G">${no.won}</b>/<b class="dir-R">${no.lost}</b>/<b class="dir-D">${no.live}</b></span>
+          <span><span class="lbl" style="color:var(--muted);">avg entry</span> <b>${fmt2(no.avg_entry)}</b></span>
+          <span><span class="lbl" style="color:var(--muted);">P&L</span> <b class="${cls(no.pnl)}">${sign(no.pnl)}</b></span>
+        </span>
+      </div>`;
+  }
+
+
+  // Map server's execution_path to a compact chip. In paper mode the
+  // executor isn't running, so execution_path stays null → "PAPER" chip.
+  // For settled live orders the chip is filled at the limit price (LIMIT) or
+  // via the market fallback (MARKET); "DROP" means the book moved past cap;
+  // "SKIP" covers kill-switch / stale-quote / price-OOB / no-quotes paths.
+  function fillChip(t) {
+    const mode = t.execution_mode;
+    const path = t.execution_path;
+    if (mode !== "live") {
+      return `<span title="Paper mode — no real order placed" style="color:var(--muted);font-size:10px;background:rgba(110,118,129,0.15);padding:1px 6px;border-radius:3px;">PAPER</span>`;
+    }
+    if (path == null) {
+      return `<span title="Live order in flight — fill not yet resolved" style="color:#d29922;font-size:10px;background:rgba(210,153,34,0.15);padding:1px 6px;border-radius:3px;">PENDING</span>`;
+    }
+    if (path === "maker") {
+      return `<span title="Maker limit filled at the posted bid (lowest fee, best price)" style="color:#3fb950;font-size:10px;background:rgba(63,185,80,0.15);padding:1px 6px;border-radius:3px;">LIMIT</span>`;
+    }
+    if (path === "mkt_after_maker") {
+      return `<span title="Maker limit expired (3s TTL) → market fallback hit at ask + cap (taker fee)" style="color:#58a6ff;font-size:10px;background:rgba(88,166,255,0.15);padding:1px 6px;border-radius:3px;">MARKET</span>`;
+    }
+    if (path === "drop_cap_exceeded") {
+      return `<span title="Maker expired AND market moved past ask + 5¢ cap → trade dropped (paper P&L still recorded)" style="color:#f87171;font-size:10px;background:rgba(248,113,113,0.15);padding:1px 6px;border-radius:3px;">DROP</span>`;
+    }
+    // skip_* family or unexpected value
+    const label = (path || "").replace(/^skip_/, "").toUpperCase().slice(0, 8) || "SKIP";
+    return `<span title="${path}" style="color:#d29922;font-size:10px;background:rgba(210,153,34,0.15);padding:1px 6px;border-radius:3px;">${label}</span>`;
+  }
+
+  const rows = trades.slice().reverse().map((t, i) => {
+    const wall = fmtTimeET((t.wall_ts || 0) * 1000);
+    const isBuyYes = t.direction === "BUY YES";
+    const actCls = "dir-" + (isBuyYes ? "G" : "R");
+    const pnl = t.pnl;
+    let pnlTxt, pnlCls;
+    if (pnl == null || isNaN(pnl)) {
+      pnlTxt = "—"; pnlCls = "dir-D";
+    } else {
+      const tag = t.status === "won"  ? " <span class='dir-G' style='font-size:9px;'>WON</span>"
+                : t.status === "lost" ? " <span class='dir-R' style='font-size:9px;'>LOST</span>"
+                :                       " <span class='dir-D' style='font-size:9px;'>live</span>";
+      pnlTxt = ((pnl >= 0 ? "+" : "−") + "$" + Math.abs(pnl).toFixed(3)) + tag;
+      pnlCls = pnl > 0 ? "dir-G" : pnl < 0 ? "dir-R" : "dir-D";
+    }
+    const rowCls = i === 0 ? "live" : "";
+    return `<tr class="${rowCls}">
+      <td>${wall}</td>
+      <td>${t.sample_sec}s</td>
+      <td class="${actCls}">${t.direction}</td>
+      <td>${fillChip(t)}</td>
+      <td class="${actCls}">+${(Number(t.delta_pp) * 100).toFixed(1)} pp</td>
+      <td>${Number(t.model_p).toFixed(3)}</td>
+      <td>${Number(t.market_mid).toFixed(3)}</td>
+      <td>${Number(t.entry_bid).toFixed(3)}/${Number(t.entry_ask).toFixed(3)}</td>
+      <td class="${pnlCls}">${pnlTxt}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = rows.join("");
+}
+
+
+connectPred();
+
+// Model & candle context panel was removed — its loaders (loadModelInfo,
+// renderModelInfo, candleMeta updates) are intentionally not wired now.
+// If you want the panel back, restore the <div class="panel"> in main and
+// re-add a `loadModelInfo()` call on page load.
+
+// ─── Arb parameter sweep (hindsight) ───────────────────────────────────
+async function refreshOptimal() {
+  const base = location.protocol === "file:" ? "http://localhost:8000" : "";
+  try {
+    const [r1, r5] = await Promise.all([
+      fetch(`${base}/optimal_settings?n_windows=1`).then(r => r.json()),
+      fetch(`${base}/optimal_settings?n_windows=5`).then(r => r.json()),
+    ]);
+    renderOptimal("optLast1", r1, 1);
+    renderOptimal("optLast5", r5, 5);
+  } catch (e) {
+    $("optLast1").innerHTML = `<span class="d">fetch failed: ${e}</span>`;
+    $("optLast5").innerHTML = `<span class="d">fetch failed: ${e}</span>`;
+  }
+}
+
+function renderOptimal(elId, data, requested) {
+  const el = $(elId);
+  if (!el) return;
+  if (data.error) {
+    el.innerHTML = `<span class="d">${data.error}</span>`;
+    return;
+  }
+  const t = data.top;
+  const c = data.current;
+  const gain = data.gain_if_optimal;
+  const sign = v => v >= 0 ? `+$${v.toFixed(3)}` : `−$${Math.abs(v).toFixed(3)}`;
+  const cls  = v => v > 0 ? "dir-G" : v < 0 ? "dir-R" : "dir-D";
+
+  // Outcome chips for each window analyzed
+  const chips = (data.windows || []).map(w => {
+    const time = fmtTimeShortET(w.window_open_ts * 1000);
+    const c2 = w.outcome === "UP" ? "dir-G" : "dir-R";
+    return `<span class="${c2}" style="display:inline-block;margin-right:6px;">${time} ${w.outcome}</span>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div style="margin-bottom:6px;">
+      <span class="lbl" style="color:var(--muted);">analyzed:</span>
+      ${data.n_windows_analyzed} of ${requested} requested windows
+    </div>
+    <div style="margin-bottom:10px;font-size:11px;">${chips}</div>
+
+    <div style="padding:8px;background:rgba(63,185,80,0.06);border-radius:4px;margin-bottom:8px;">
+      <div class="lbl" style="color:var(--green);">OPTIMAL SETTING</div>
+      <div style="font-variant-numeric:tabular-nums;">
+        K_yes=${t.k_yes.toFixed(2)} · K_no=${t.k_no.toFixed(2)} ·
+        Δ_yes=${t.d_yes.toFixed(2)} · Δ_no=${t.d_no.toFixed(2)}
+      </div>
+      <div style="margin-top:2px;">
+        P&L: <span class="${cls(t.pnl)}">${sign(t.pnl)}</span> across ${t.trades} trade${t.trades===1?"":"s"}
+      </div>
+      ${t.n_tied > 1 ? `<div style="margin-top:2px;font-size:11px;color:var(--muted);">
+        ${t.n_tied} combos tied at this P&L — showing the tightest (most conservative) one
+      </div>` : ""}
+    </div>
+
+    <div style="padding:8px;background:rgba(88,166,255,0.05);border-radius:4px;">
+      <div class="lbl" style="color:var(--accent);">CURRENT (live)</div>
+      <div style="font-variant-numeric:tabular-nums;">
+        K_yes=${c.k_yes.toFixed(2)} · K_no=${c.k_no.toFixed(2)} ·
+        Δ_yes=${c.d_yes.toFixed(2)} · Δ_no=${c.d_no.toFixed(2)}
+      </div>
+      <div style="margin-top:2px;">
+        P&L: <span class="${cls(c.pnl ?? 0)}">${sign(c.pnl ?? 0)}</span>
+        across ${c.trades ?? 0} trade${c.trades===1?"":"s"} ·
+        rank #${c.rank ?? "?"} of ${data.total_combos}
+      </div>
+      <div style="margin-top:4px;font-size:11px;color:var(--muted);">
+        Gain if switched to optimal: <span class="${cls(gain)}">${sign(gain)}</span>
+      </div>
+    </div>
+  `;
+}
+
+refreshOptimal();
+setInterval(refreshOptimal, 60_000);
+
+// ─── Per-window settlement log ─────────────────────────────────────────
+async function refreshWindowPnL() {
+  const base = location.protocol === "file:" ? "http://localhost:8000" : "";
+  try {
+    const r = await fetch(`${base}/window_pnl_log?limit=20`).then(r => r.json());
+    renderWindowPnL(r);
+  } catch (e) {
+    $("windowPnLRows").innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:14px;">fetch failed: ${e}</td></tr>`;
+  }
+}
+
+function renderWindowPnL(data) {
+  const tbody = $("windowPnLRows");
+  if (!tbody) return;
+  const entries = (data && data.entries) || [];
+  if (!entries.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:14px;">no settled windows yet…</td></tr>`;
+    return;
+  }
+  const fmtPnL = v => (v >= 0 ? "+" : "−") + "$" + Math.abs(v).toFixed(3);
+  const cls = v => v > 0 ? "dir-G" : v < 0 ? "dir-R" : "dir-D";
+
+  // Compute running cum P&L in chronological order (oldest → newest),
+  // then map to a wts → cum lookup so the reversed render can read it.
+  const chrono = entries.slice().sort((a, b) =>
+    Number(a.window_open_ts) - Number(b.window_open_ts));
+  const cumByTs = new Map();
+  let running = 0;
+  for (const e of chrono) {
+    running += Number(e.pnl) || 0;
+    cumByTs.set(e.window_open_ts, running);
+  }
+
+  const rows = entries.slice().reverse().map(e => {
+    const time = fmtTimeShortET(e.window_open_ts * 1000);
+    const th = e.thresholds || {};
+    const tag = e.rehydrated
+      ? ` <span title="Re-simulated with CURRENT thresholds (no historical record exists for this window)." style="color:#d29922;font-size:9px;background:rgba(210,153,34,0.15);border:1px solid rgba(210,153,34,0.3);padding:1px 5px;border-radius:3px;margin-left:6px;">REPLAY</span>`
+      : ` <span title="Settled live with these thresholds active." style="color:#3fb950;font-size:9px;background:rgba(63,185,80,0.10);border:1px solid rgba(63,185,80,0.3);padding:1px 5px;border-radius:3px;margin-left:6px;">LIVE</span>`;
+    const thStyle = e.rehydrated ? 'style="color:var(--muted);"' : '';
+    const wAvg = e.winner_avg_entry;
+    const lAvg = e.loser_avg_entry;
+    const hasAvg = (wAvg != null) || (lAvg != null);
+    const fmtSide = (count, avg) => avg != null
+      ? `${count} × $${Number(avg).toFixed(3)}`
+      : `${count}`;
+    const wlCell = hasAvg
+      ? `<span class="dir-G">${fmtSide(e.wins,  wAvg)}W</span>
+         <span style="color:var(--muted);"> / </span>
+         <span class="dir-R">${fmtSide(e.losses, lAvg)}L</span>`
+      : `${e.wins}W / ${e.losses}L`;
+    const cum = cumByTs.get(e.window_open_ts) ?? 0;
+    return `<tr>
+      <td>${time}${tag}</td>
+      <td class="${e.outcome === 'UP' ? 'dir-G' : 'dir-R'}">${e.outcome}</td>
+      <td class="${(e.delta_bps||0) >= 0 ? 'dir-G' : 'dir-R'}">${(e.delta_bps>=0?'+':'')+e.delta_bps.toFixed(2)}</td>
+      <td ${thStyle}>${th.k_yes?.toFixed(2)} / ${th.k_no?.toFixed(2)} / ${(th.d_yes*100).toFixed(0)}pp / ${(th.d_no*100).toFixed(0)}pp</td>
+      <td>${e.trades}</td>
+      <td style="white-space:nowrap;">${wlCell}</td>
+      <td class="${cls(e.pnl)}">${fmtPnL(e.pnl)}</td>
+      <td class="${cls(cum)}" style="font-weight:600;">${fmtPnL(cum)}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = rows.join("");
+}
+
+refreshWindowPnL();
+setInterval(refreshWindowPnL, 30_000);
+
+// ─── BTC candlestick chart with 15-min window boundary markers ─────────
+// Replaces the TradingView widget — fetches 1-min OHLC candles from the
+// local server's /btc_candles proxy (which proxies Coinbase Advanced
+// Trade REST) and renders a Plotly candlestick chart with dashed vertical
+// lines at every :00/:15/:30/:45 mark (Kalshi schedules windows on UTC
+// 15-min boundaries; the same minute-marks happen in ET, just shifted hours).
+// ─── BTC price over CURRENT 15-min window ────────────────────────────────
+// Plots per-second `current_price` against `sample_sec` (0-900). Adds a
+// horizontal dashed reference line at the window-open price so the
+// distance-from-open is visible at a glance. Title strip shows live
+// price, Δ from open in dollars, and bps.
+const BTC_WIN_CHART_ID = "btcWinChart";
+let btcWinInited = false;
+const btcWinSeries = { windowOpenTs: null, openPx: null, data: [] };
+
+const BTC_WIN_LAYOUT = {
+  paper_bgcolor: "#161b22",
+  plot_bgcolor:  "#0e1116",
+  font: { color: "#e6edf3", size: 11, family: "ui-monospace, SFMono-Regular, Menlo, monospace" },
+  margin: { l: 70, r: 20, t: 10, b: 50 },
+  hovermode: "x unified",
+  xaxis: {
+    title: { text: "seconds into 15-min window", font: { size: 11 } },
+    range: [0, 900],
+    gridcolor: "#23272d",
+    zerolinecolor: "#30363d",
+    tickvals: [0, 60, 120, 180, 240, 300, 360, 420, 480, 540, 600, 660, 720, 780, 840, 900],
+  },
+  yaxis: {
+    title: { text: "BTC-USD", font: { size: 11 } },
+    gridcolor: "#23272d",
+    zerolinecolor: "#30363d",
+    tickformat: ",.0f",
+  },
+  showlegend: false,
+  shapes: [
+    // 0: window-open reference line (y values rewritten when openPx is known)
+    { type: "line", xref: "x", yref: "y",
+      x0: 0, x1: 900, y0: 0, y1: 0,
+      line: { color: "#d29922", width: 1, dash: "dash" } },
+  ],
+};
+
+const BTC_WIN_CONFIG = {
+  responsive: true,
+  displaylogo: false,
+  modeBarButtonsToRemove: ["lasso2d","select2d","autoScale2d",
+    "toggleSpikelines","hoverClosestCartesian","hoverCompareCartesian"],
+  scrollZoom: false,
+};
+
+function ensureBtcWinInit() {
+  if (btcWinInited || !window.Plotly) return;
+  Plotly.newPlot(BTC_WIN_CHART_ID, [{
+    x: [], y: [],
+    name: "BTC",
+    type: "scatter", mode: "lines",
+    line: { color: "#58a6ff", width: 2 },
+    hovertemplate: "T+%{x}s · $%{y:,.2f}<extra></extra>",
+  }], BTC_WIN_LAYOUT, BTC_WIN_CONFIG);
+  btcWinInited = true;
+}
+
+function btcWinAppend(p) {
+  const wTs    = Number(p.window_open_ts);
+  const openPx = p.window_open_px != null ? Number(p.window_open_px) : null;
+  const sec    = Number(p.sample_sec);
+  const px     = p.current_price != null ? Number(p.current_price) : null;
+  if (!Number.isFinite(sec) || px == null || !Number.isFinite(px)) return;
+
+  const windowChanged = btcWinSeries.windowOpenTs !== wTs;
+  if (windowChanged) {
+    btcWinSeries.windowOpenTs = wTs;
+    btcWinSeries.openPx = openPx;
+    btcWinSeries.data = [];
+    if (btcWinInited && window.Plotly) {
+      Plotly.restyle(BTC_WIN_CHART_ID, { x: [[]], y: [[]] }, [0]);
+      Plotly.relayout(BTC_WIN_CHART_ID, {
+        "xaxis.range": [0, 900],
+        ...(openPx != null ? { "shapes[0].y0": openPx, "shapes[0].y1": openPx } : {}),
+      });
+    }
+  } else if (openPx != null && btcWinSeries.openPx == null) {
+    // open price arrived after first tick — anchor the ref line now
+    btcWinSeries.openPx = openPx;
+    if (btcWinInited && window.Plotly) {
+      Plotly.relayout(BTC_WIN_CHART_ID, { "shapes[0].y0": openPx, "shapes[0].y1": openPx });
+    }
+  }
+
+  ensureBtcWinInit();
+  if (!btcWinInited || !window.Plotly) return;
+
+  // Only push on sec boundary (publisher fires 5 Hz; sample_sec advances 1 Hz)
+  const last = btcWinSeries.data[btcWinSeries.data.length - 1];
+  if (!last || sec !== last.sec) {
+    btcWinSeries.data.push({ sec, px });
+    Plotly.extendTraces(BTC_WIN_CHART_ID, { x: [[sec]], y: [[px]] }, [0]);
+  } else {
+    last.px = px;
+  }
+
+  // Header strip: live price, Δ$, Δbps
+  const stats = document.getElementById("btcWinTitleStats");
+  if (stats) {
+    const op = btcWinSeries.openPx;
+    if (op != null && Number.isFinite(op) && op > 0) {
+      const d   = px - op;
+      const bps = (px / op - 1) * 10000;
+      const sign = d >= 0 ? "+" : "−";
+      const color = d >= 0 ? "#3fb950" : "#f87171";
+      stats.innerHTML =
+        `open <strong>$${op.toLocaleString(undefined,{maximumFractionDigits:2})}</strong>` +
+        ` · now <strong>$${px.toLocaleString(undefined,{maximumFractionDigits:2})}</strong>` +
+        ` · <span style="color:${color};">Δ ${sign}$${Math.abs(d).toFixed(2)}` +
+        ` (${sign}${Math.abs(bps).toFixed(1)} bps)</span>`;
+    } else {
+      stats.textContent = `T+${sec}s · $${px.toLocaleString(undefined,{maximumFractionDigits:2})}`;
+    }
+  }
+}
+
+</script>
+</body>
+</html>

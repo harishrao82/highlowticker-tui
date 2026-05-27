@@ -72,5 +72,6 @@ logs/
 *.db-shm
 *.db-wal
 *.html
+!btc-predictor/web/*.html
 a.ipynb
 .ipynb_checkpoints/
