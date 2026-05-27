@@ -640,32 +640,45 @@ let chartInited = false;
 const series = { wTs: null, data: [] };   // data: [{sec, kalshi_p, model_p}]
 
 const LAYOUT = {
-  paper_bgcolor: "#0c1220",
-  plot_bgcolor:  "#0c1220",
+  paper_bgcolor: "#141414",
+  plot_bgcolor:  "#141414",
   font: { color: "#8a8a8a", size: 11, family: "Inter, system-ui, sans-serif" },
-  margin: { l: 70, r: 24, t: 16, b: 38 },
+  margin: { l: 72, r: 28, t: 24, b: 56 },
   hovermode: false,
   showlegend: false,
   xaxis: {
+    title: { text: "Minutes into 15-min window", font: { size: 11, color: "#8a8a8a" }, standoff: 12 },
     range: [0, 900],
     tickvals: [0, 180, 360, 540, 720, 900],
-    ticktext: ["0:00", "3:00", "6:00", "9:00", "12:00", "15:00"],
-    gridcolor: "#1a2238",
-    zerolinecolor: "#1a2238",
+    ticktext: ["0", "3", "6", "9", "12", "15"],
+    gridcolor: "#1f1f1f",
+    zerolinecolor: "#262626",
     showspikes: false,
   },
   yaxis: {
+    title: { text: "P(Yes)", font: { size: 12, color: "#8a8a8a" }, standoff: 8 },
     range: [0, 1],
     tickvals: [0, 0.25, 0.5, 0.75, 1.0],
     ticktext: ["0%", "25%", "50%", "75%", "100%"],
-    gridcolor: "#1a2238",
-    zerolinecolor: "#1a2238",
+    gridcolor: "#1f1f1f",
+    zerolinecolor: "#262626",
     showspikes: false,
   },
+  annotations: [
+    // Top-right helper: tells the viewer that the (implicit) NO line is
+    // just the mirror of the YES line — no need to draw a second trace.
+    {
+      xref: "paper", yref: "paper",
+      x: 1, y: 1.06, xanchor: "right", yanchor: "bottom",
+      showarrow: false,
+      text: "P(No) = 1 − P(Yes)",
+      font: { size: 11, color: "#6b6b6b", family: "Inter, system-ui, sans-serif" },
+    },
+  ],
   shapes: [
     // 0: 50% midline — the coin-flip baseline
     { type: "line", xref: "x", yref: "y", x0: 0, x1: 900, y0: 0.5, y1: 0.5,
-      line: { color: "#ffcc00", width: 1.2, dash: "dash" } },
+      line: { color: "#f59e0b", width: 1.2, dash: "dash" } },
   ],
 };
 const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: false, staticPlot: true };
