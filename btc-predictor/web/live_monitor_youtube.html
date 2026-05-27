@@ -245,28 +245,48 @@
     box-shadow: 0 0 10px rgba(255,255,255,0.6);
     transform: translateX(-50%);
   }
-  .ynbar-ai-marker {
-    position: absolute;
-    top: 22px;
-    transform: translateX(-50%);
-    transition: left .35s cubic-bezier(.2,.7,.3,1);
-    text-align: center;
-    pointer-events: none;
+  /* Per-side stats cards (under the tug-of-war bar) */
+  .yn-stats {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
   }
-  .ynbar-ai-marker .tri {
-    color: var(--gold);
-    font-size: 16px;
-    line-height: 1;
-    filter: drop-shadow(0 0 6px rgba(255,204,0,0.8));
+  .yn-card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00));
+    border: 1px solid #1a2440;
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: auto 1fr 1fr 1fr;
+    gap: 14px;
+    align-items: center;
   }
-  .ynbar-ai-marker .ai-lbl {
+  .yn-card.yes { border-left: 3px solid var(--profit); }
+  .yn-card.no  { border-left: 3px solid var(--loss); }
+  .yn-card .side-lbl {
     font-family: "Bebas Neue";
-    font-size: 12px;
-    letter-spacing: 3px;
-    color: var(--gold);
-    margin-top: 2px;
-    text-shadow: 0 0 8px rgba(255,204,0,0.5);
+    font-size: 20px;
+    letter-spacing: 5px;
   }
+  .yn-card.yes .side-lbl { color: var(--profit); }
+  .yn-card.no  .side-lbl { color: var(--loss); }
+  .yn-card .stat .v {
+    font-family: "JetBrains Mono";
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text);
+  }
+  .yn-card .stat .l {
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .yn-card .stat .v.profit { color: var(--profit); }
+  .yn-card .stat .v.loss   { color: var(--loss); }
+  .yn-card .stat .v.muted  { color: var(--muted); }
 
   /* SIGNAL TICKER */
   #ticker {
@@ -445,9 +465,19 @@
       <div class="ynbar-fill-no"  id="ynbar-fill-no"  style="width:50%;"></div>
       <div class="ynbar-edge"     id="ynbar-edge"     style="left:50%;"></div>
     </div>
-    <div class="ynbar-ai-marker" id="ynbar-ai" style="left:50%;display:none;">
-      <div class="tri">▲</div>
-      <div class="ai-lbl">A.I. · <span id="ai-pct">—</span></div>
+    <div class="yn-stats">
+      <div class="yn-card yes">
+        <div class="side-lbl">▲ UP</div>
+        <div class="stat"><div class="v" id="yes-fires">0</div><div class="l">FIRES</div></div>
+        <div class="stat"><div class="v" id="yes-avg">$—</div><div class="l">AVG ENTRY</div></div>
+        <div class="stat"><div class="v" id="yes-pnl">$0.00</div><div class="l">PROFIT</div></div>
+      </div>
+      <div class="yn-card no">
+        <div class="side-lbl">▼ DOWN</div>
+        <div class="stat"><div class="v" id="no-fires">0</div><div class="l">FIRES</div></div>
+        <div class="stat"><div class="v" id="no-avg">$—</div><div class="l">AVG ENTRY</div></div>
+        <div class="stat"><div class="v" id="no-pnl">$0.00</div><div class="l">PROFIT</div></div>
+      </div>
     </div>
   </div>
   <div id="btc-chart"></div>
@@ -557,14 +587,11 @@ function ensureChartInit() {
     // 0: Kalshi YES mid — market consensus
     { x: [], y: [], type: "scatter", mode: "lines", name: "MARKET",
       line: { color: "#00d4ff", width: 2.8, shape: "spline", smoothing: 0.4 } },
-    // 1: Model P(UP) — A.I. view
-    { x: [], y: [], type: "scatter", mode: "lines", name: "A.I.",
-      line: { color: "#00ff9f", width: 2.8, shape: "spline", smoothing: 0.4 } },
-    // 2: BUY UP triangles
+    // 1: BUY UP triangles
     { x: [], y: [], type: "scatter", mode: "markers",
       marker: { symbol: "triangle-up", size: [], color: "#00ff9f",
                 line: { color: "#003a25", width: 1.5 } } },
-    // 3: BUY DOWN triangles
+    // 2: BUY DOWN triangles
     { x: [], y: [], type: "scatter", mode: "markers",
       marker: { symbol: "triangle-down", size: [], color: "#ff3b6b",
                 line: { color: "#3a000f", width: 1.5 } } },
@@ -575,9 +602,8 @@ function ensureChartInit() {
 function probChartPush(p) {
   const wTs   = Number(p.window_open_ts);
   const sec   = Number(p.sample_sec);
-  const mPy   = Number(p.p_green);
   const kPy   = (p.kalshi && p.kalshi.yes_mid != null) ? Number(p.kalshi.yes_mid) : null;
-  if (!Number.isFinite(sec) || !Number.isFinite(mPy)) return;
+  if (!Number.isFinite(sec)) return;
 
   const changed = series.wTs !== wTs;
   if (changed) {
@@ -586,7 +612,7 @@ function probChartPush(p) {
     _clusterKey = "";
     ensureChartInit();
     if (chartInited && window.Plotly) {
-      Plotly.restyle(CHART_ID, { x: [[],[],[],[]], y: [[],[],[],[]] });
+      Plotly.restyle(CHART_ID, { x: [[],[],[]], y: [[],[],[]] });
       Plotly.relayout(CHART_ID, { "xaxis.range": [0, 900] });
     }
   }
@@ -596,22 +622,14 @@ function probChartPush(p) {
 
   const last = series.data[series.data.length - 1];
   if (!last || sec !== last.sec) {
-    series.data.push({ sec, kalshi_p: kPy, model_p: mPy });
-    Plotly.extendTraces(CHART_ID, {
-      x: [[sec], [sec]],
-      y: [[kPy], [mPy]],
-    }, [0, 1]);
+    series.data.push({ sec, kalshi_p: kPy });
+    Plotly.extendTraces(CHART_ID, { x: [[sec]], y: [[kPy]] }, [0]);
   } else {
     last.kalshi_p = kPy;
-    last.model_p  = mPy;
   }
 
-  // ── Tug-of-war YES/NO price bar ──
-  // Kalshi YES mid + bid/ask come straight off the WS; NO is the
-  // complement. Bar fill = current YES share of the market. A.I.
-  // marker sits on the same horizontal scale at model_p, so when it
-  // drifts away from the edge the audience can see the algorithm
-  // disagreeing with the market in real time.
+  // ── Tug-of-war YES/NO price bar (header bits only — stats cards
+  //    below are populated separately from the arb_window trade list).
   const k = p.kalshi || {};
   const yMid = (k.yes_mid != null) ? Number(k.yes_mid) : (kPy != null ? kPy : null);
   const yAsk = (k.yes_ask != null) ? Number(k.yes_ask) : null;
@@ -621,7 +639,6 @@ function probChartPush(p) {
     $("ynbar-fill-yes").style.width = yPct + "%";
     $("ynbar-fill-no").style.width  = (100 - yPct) + "%";
     $("ynbar-edge").style.left      = yPct + "%";
-    // Price label is the ASK if we have it (what you'd actually pay), mid otherwise.
     const yPrice = yAsk != null && Number.isFinite(yAsk) ? yAsk : yMid;
     const nPrice = 1 - yPrice;
     $("yes-price").textContent = "$" + yPrice.toFixed(3);
@@ -629,15 +646,42 @@ function probChartPush(p) {
     $("yes-pct").textContent = (yMid * 100).toFixed(0) + "%";
     $("no-pct").textContent  = (nMid * 100).toFixed(0) + "%";
   }
-  // A.I. marker — position at model_p on the same 0-100% scale
-  const aiEl = $("ynbar-ai");
-  if (Number.isFinite(mPy)) {
-    aiEl.style.display = "";
-    aiEl.style.left = (Math.max(0, Math.min(100, mPy * 100))) + "%";
-    $("ai-pct").textContent = (mPy * 100).toFixed(0) + "%";
-  } else {
-    aiEl.style.display = "none";
+}
+
+// ── Per-side stats: average entry, fire count, profit, computed from
+//    the current arb_window. UP = "BUY YES" side, DOWN = "BUY NO" side.
+//    Profit is summed across ALL trades (settled+live); live ones
+//    contribute their live mark-to-market pnl.
+function refreshYNStats(arbWindow) {
+  const trades = (arbWindow && arbWindow.trades) || [];
+  let yFires = 0, ySumEntry = 0, ySumPnl = 0;
+  let nFires = 0, nSumEntry = 0, nSumPnl = 0;
+  for (const t of trades) {
+    const entry = Number(t.entry_ask);
+    const pnl   = Number(t.pnl);
+    if (t.direction === "BUY YES") {
+      yFires++;
+      if (Number.isFinite(entry)) ySumEntry += entry;
+      if (Number.isFinite(pnl))   ySumPnl   += pnl;
+    } else if (t.direction === "BUY NO") {
+      nFires++;
+      if (Number.isFinite(entry)) nSumEntry += entry;
+      if (Number.isFinite(pnl))   nSumPnl   += pnl;
+    }
   }
+  const setStat = (id, txt, cls) => {
+    const el = $(id);
+    el.textContent = txt;
+    el.className = "v" + (cls ? " " + cls : "");
+  };
+  setStat("yes-fires", String(yFires), yFires === 0 ? "muted" : "");
+  setStat("yes-avg",   yFires ? "$" + (ySumEntry / yFires).toFixed(3) : "$—", yFires === 0 ? "muted" : "");
+  setStat("yes-pnl",   yFires ? fmtMoney(ySumPnl) : "$0.00",
+                       yFires === 0 ? "muted" : (ySumPnl >= 0 ? "profit" : "loss"));
+  setStat("no-fires",  String(nFires), nFires === 0 ? "muted" : "");
+  setStat("no-avg",    nFires ? "$" + (nSumEntry / nFires).toFixed(3) : "$—", nFires === 0 ? "muted" : "");
+  setStat("no-pnl",    nFires ? fmtMoney(nSumPnl) : "$0.00",
+                       nFires === 0 ? "muted" : (nSumPnl >= 0 ? "profit" : "loss"));
 }
 
 // ─── Clustering for the chart triangles ──────────────────────────────────
@@ -669,7 +713,7 @@ function refreshChartClusters(arbWindow) {
   if (key === _clusterKey) return;
   _clusterKey = key;
   if (!trades.length) {
-    Plotly.restyle(CHART_ID, { x: [[],[]], y: [[],[]], "marker.size": [[],[]] }, [2, 3]);
+    Plotly.restyle(CHART_ID, { x: [[],[]], y: [[],[]], "marker.size": [[],[]] }, [1, 2]);
     return;
   }
   const clusters = clusterTrades(trades);
@@ -689,7 +733,7 @@ function refreshChartClusters(arbWindow) {
   }
   Plotly.restyle(CHART_ID, {
     x: [upX, dnX], y: [upY, dnY], "marker.size": [upSize, dnSize]
-  }, [2, 3]);
+  }, [1, 2]);
 }
 
 // ─── Signal feed (right ticker) ──────────────────────────────────────────
@@ -891,6 +935,7 @@ function connectPred() {
 function onPrediction(p) {
   probChartPush(p);
   refreshChartClusters(p.arb_window);
+  refreshYNStats(p.arb_window);
   maybeFlashNewSignals(p.arb_window);
   renderTicker(p.arb_window);
   updateHeaderStats(p.arb_window);
