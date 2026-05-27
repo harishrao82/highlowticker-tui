@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MODEL_PATH = REPO_ROOT / "src" / "model" / "model.pkl"
 BASELINES_PATH = REPO_ROOT / "data" / "processed" / "baselines.json"
 HTML_PATH = REPO_ROOT / "web" / "live_monitor.html"
+YOUTUBE_HTML_PATH = REPO_ROOT / "web" / "live_monitor_youtube.html"
 # Append-only JSONL log of (wall_ts, model P, Kalshi prices) at 1Hz dedupe
 # so we can backtest / chart trends across many windows after the fact.
 PREDICTION_LOG_PATH = REPO_ROOT / "data" / "predictions.jsonl"
@@ -1361,6 +1362,14 @@ async def health():
 @app.get("/")
 async def root():
     return FileResponse(HTML_PATH)
+
+
+@app.get("/youtube")
+async def youtube_dashboard():
+    """Stripped-down, presentation-mode dashboard intended for YouTube
+    streaming: big P&L, signal feed, BTC chart with entry arrows — model
+    internals (probabilities, thresholds, deltas) are intentionally hidden."""
+    return FileResponse(YOUTUBE_HTML_PATH)
 
 
 @app.websocket("/ws/predictions")

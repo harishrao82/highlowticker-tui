@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>BTC ALGO · LIVE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #05070d;
+    --bg-panel:  #0c1220;
+    --bg-glow:   #11182c;
+    --text:      #f0f4ff;
+    --muted:     #8694b8;
+    --accent:    #00d4ff;
+    --profit:    #00ff9f;
+    --profit-dim:#0a6e4a;
+    --loss:      #ff3b6b;
+    --loss-dim:  #6e0a2a;
+    --gold:      #ffcc00;
+    --grid:      #1a2238;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: radial-gradient(ellipse at top, #0e1530 0%, #05070d 65%);
+    color: var(--text);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    height: 100vh; overflow: hidden;
+    user-select: none;
+  }
+
+  /* Page grid: top hero band, big chart, signal ticker on right */
+  body {
+    display: grid;
+    grid-template-rows: 130px 1fr 90px;
+    grid-template-columns: 1fr 340px;
+    gap: 14px;
+    padding: 14px;
+  }
+
+  /* HEADER */
+  header {
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-glow) 100%);
+    border: 1px solid #1a2440;
+    border-radius: 14px;
+    padding: 14px 24px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 20px;
+    align-items: center;
+    box-shadow: 0 0 60px rgba(0, 212, 255, 0.06) inset;
+  }
+  .brand {
+    font-family: "Bebas Neue", sans-serif;
+    font-size: 38px;
+    letter-spacing: 6px;
+    background: linear-gradient(90deg, var(--accent), var(--profit));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .brand-sub {
+    font-size: 10px;
+    letter-spacing: 4px;
+    color: var(--muted);
+    margin-top: -4px;
+  }
+  .pulse-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--profit);
+    box-shadow: 0 0 14px var(--profit);
+    animation: pulse 1.6s ease-in-out infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.45; transform: scale(0.8); }
+  }
+  .live-tag {
+    font-family: "Bebas Neue";
+    font-size: 22px;
+    letter-spacing: 5px;
+    color: var(--profit);
+  }
+  .header-center { text-align: center; }
+  .pnl-hero {
+    font-family: "JetBrains Mono";
+    font-weight: 800;
+    font-size: 64px;
+    line-height: 1;
+    transition: color .25s ease, text-shadow .25s ease;
+  }
+  .pnl-hero.profit { color: var(--profit); text-shadow: 0 0 26px rgba(0, 255, 159, 0.55); }
+  .pnl-hero.loss   { color: var(--loss);   text-shadow: 0 0 26px rgba(255, 59, 107, 0.55); }
+  .pnl-label {
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .header-right {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+    text-align: center;
+    align-items: end;
+  }
+  .stat-box .stat-v {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .stat-box .stat-l {
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .wr-good { color: var(--profit); }
+  .wr-mid  { color: var(--gold); }
+  .wr-bad  { color: var(--loss); }
+
+  /* CHART PANEL */
+  #chart-panel {
+    background: var(--bg-panel);
+    border: 1px solid #1a2440;
+    border-radius: 14px;
+    padding: 20px 22px 14px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .chart-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .chart-title {
+    font-family: "Bebas Neue";
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: var(--accent);
+  }
+  .chart-price {
+    font-size: 32px;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .chart-delta {
+    font-size: 14px;
+    margin-left: 14px;
+    font-weight: 700;
+  }
+  .chart-delta.profit { color: var(--profit); }
+  .chart-delta.loss   { color: var(--loss); }
+  #btc-chart { flex: 1; width: 100%; min-height: 200px; }
+  .countdown {
+    position: absolute;
+    bottom: 12px;
+    right: 22px;
+    font-family: "Bebas Neue";
+    font-size: 28px;
+    letter-spacing: 5px;
+    color: var(--muted);
+    opacity: .85;
+  }
+  .countdown .c-val { color: var(--text); }
+  .countdown .c-lab { font-size: 11px; letter-spacing: 3px; }
+
+  /* SIGNAL TICKER */
+  #ticker {
+    background: var(--bg-panel);
+    border: 1px solid #1a2440;
+    border-radius: 14px;
+    padding: 18px 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ticker-title {
+    font-family: "Bebas Neue";
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .ticker-sub {
+    font-size: 10px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  #ticker-list {
+    flex: 1;
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .sig-row {
+    background: var(--bg-glow);
+    border-left: 3px solid var(--muted);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    transition: opacity .4s ease, transform .4s ease, background .4s ease;
+  }
+  .sig-row.new {
+    animation: slideIn .4s ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); background: rgba(0,212,255,0.25); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .sig-row.live  { border-left-color: var(--gold);   }
+  .sig-row.won   { border-left-color: var(--profit); background: linear-gradient(90deg, rgba(0,255,159,0.10), var(--bg-glow)); }
+  .sig-row.lost  { border-left-color: var(--loss);   background: linear-gradient(90deg, rgba(255,59,107,0.10), var(--bg-glow)); }
+  .sig-row .when { color: var(--muted); font-size: 10px; letter-spacing: 1px; }
+  .sig-row .dir  { font-weight: 700; }
+  .sig-row .dir.up   { color: var(--profit); }
+  .sig-row .dir.down { color: var(--loss);   }
+  .sig-row .pnl-line { display: flex; justify-content: space-between; margin-top: 4px; }
+  .sig-row .status   { font-size: 10px; letter-spacing: 2px; }
+  .sig-row .pnl      { font-weight: 700; }
+  .sig-row .pnl.profit { color: var(--profit); }
+  .sig-row .pnl.loss   { color: var(--loss); }
+  .sig-row .pnl.pending { color: var(--gold); }
+
+  /* FOOTER STRIP */
+  footer {
+    grid-column: 1 / -1;
+    background: var(--bg-panel);
+    border: 1px solid #1a2440;
+    border-radius: 14px;
+    padding: 12px 24px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 18px;
+    align-items: center;
+  }
+  .footer-stat .v { font-size: 22px; font-weight: 700; line-height: 1; }
+  .footer-stat .l { font-size: 9px; letter-spacing: 3px; color: var(--muted); margin-top: 4px; }
+
+  /* SIGNAL FLASH OVERLAY */
+  #signal-flash {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.85);
+    z-index: 99;
+    padding: 24px 60px;
+    border-radius: 18px;
+    font-family: "Bebas Neue";
+    font-size: 84px;
+    letter-spacing: 14px;
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .35s ease, transform .35s ease;
+    box-shadow: 0 0 80px currentColor;
+  }
+  #signal-flash.up   { color: var(--profit); border: 3px solid var(--profit); background: rgba(0, 255, 159, 0.06); }
+  #signal-flash.down { color: var(--loss);   border: 3px solid var(--loss);   background: rgba(255, 59, 107, 0.06); }
+  #signal-flash.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #signal-flash .sub {
+    font-family: "JetBrains Mono";
+    font-size: 18px;
+    letter-spacing: 3px;
+    margin-top: 10px;
+    font-weight: 700;
+  }
+
+  /* CONN STATUS */
+  .conn-chip {
+    position: fixed;
+    top: 22px; right: 26px;
+    font-size: 10px;
+    letter-spacing: 3px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    color: var(--muted);
+    background: rgba(255,255,255,0.05);
+    z-index: 50;
+  }
+  .conn-chip.live    { color: var(--profit); }
+  .conn-chip.warn    { color: var(--gold); }
+  .conn-chip.dead    { color: var(--loss); }
+</style>
+</head>
+<body>
+
+<div id="signal-flash"></div>
+<div class="conn-chip" id="conn">connecting…</div>
+
+<header>
+  <div>
+    <div class="brand">BTC <span style="color:var(--profit)">·</span> ALGO</div>
+    <div class="brand-sub">15-MIN AUTONOMOUS · PAPER · NOT FINANCIAL ADVICE</div>
+    <div style="margin-top:10px;">
+      <span class="pulse-dot"></span>
+      <span class="live-tag">LIVE</span>
+    </div>
+  </div>
+
+  <div class="header-center">
+    <div class="pnl-hero" id="pnl-session">$0.00</div>
+    <div class="pnl-label">SESSION P&amp;L</div>
+  </div>
+
+  <div class="header-right">
+    <div class="stat-box">
+      <div class="stat-v" id="wr-pct">—</div>
+      <div class="stat-l">WIN RATE</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-v" id="trades-count">0</div>
+      <div class="stat-l">TRADES</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-v" id="window-pnl">$0.00</div>
+      <div class="stat-l">THIS WINDOW</div>
+    </div>
+  </div>
+</header>
+
+<div id="chart-panel">
+  <div class="chart-head">
+    <div class="chart-title">BTC-USD · CURRENT WINDOW</div>
+    <div>
+      <span class="chart-price" id="btc-price">$—</span>
+      <span class="chart-delta" id="btc-delta">—</span>
+    </div>
+  </div>
+  <div id="btc-chart"></div>
+  <div class="countdown">
+    <span class="c-val" id="cd-val">--:--</span>
+    <span class="c-lab"> · NEXT CYCLE</span>
+  </div>
+</div>
+
+<div id="ticker">
+  <div class="ticker-title">SIGNAL FEED</div>
+  <div class="ticker-sub">algorithm-driven · most recent first</div>
+  <div id="ticker-list">
+    <div style="color:var(--muted);font-size:11px;padding-top:30px;text-align:center;">
+      no signals yet…
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-stat">
+    <div class="v" id="f-wins" style="color:var(--profit)">0</div>
+    <div class="l">WINS TODAY</div>
+  </div>
+  <div class="footer-stat">
+    <div class="v" id="f-losses" style="color:var(--loss)">0</div>
+    <div class="l">LOSSES TODAY</div>
+  </div>
+  <div class="footer-stat">
+    <div class="v" id="f-best" style="color:var(--profit)">$0.00</div>
+    <div class="l">BEST WINDOW</div>
+  </div>
+  <div class="footer-stat">
+    <div class="v" id="f-worst" style="color:var(--loss)">$0.00</div>
+    <div class="l">WORST WINDOW</div>
+  </div>
+  <div class="footer-stat">
+    <div class="v" id="f-streak">—</div>
+    <div class="l">STREAK</div>
+  </div>
+</footer>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+<script>
+// ─── Conn chip + small helpers ───────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function setConn(t, cls) {
+  const e = $("conn");
+  e.textContent = t;
+  e.className = "conn-chip " + (cls || "");
+}
+function fmtMoney(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "$—";
+  const sign = n >= 0 ? "+" : "−";
+  return `${sign}$${Math.abs(n).toFixed(2)}`;
+}
+function fmtPrice(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "$—";
+  return "$" + n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+function relTime(secAgo) {
+  if (secAgo < 60)   return `${Math.round(secAgo)}s ago`;
+  if (secAgo < 3600) return `${Math.round(secAgo/60)}m ago`;
+  return `${Math.round(secAgo/3600)}h ago`;
+}
+
+// ─── BTC current-window chart ────────────────────────────────────────────
+const CHART_ID = "btc-chart";
+let chartInited = false;
+const series = { wTs: null, openPx: null, data: [] };
+
+const LAYOUT = {
+  paper_bgcolor: "#0c1220",
+  plot_bgcolor:  "#0c1220",
+  font: { color: "#8694b8", size: 11, family: "JetBrains Mono, monospace" },
+  margin: { l: 70, r: 24, t: 16, b: 38 },
+  hovermode: false,
+  showlegend: false,
+  xaxis: {
+    range: [0, 900],
+    tickvals: [0, 180, 360, 540, 720, 900],
+    ticktext: ["0:00", "3:00", "6:00", "9:00", "12:00", "15:00"],
+    gridcolor: "#1a2238",
+    zerolinecolor: "#1a2238",
+    showspikes: false,
+  },
+  yaxis: {
+    gridcolor: "#1a2238",
+    zerolinecolor: "#1a2238",
+    tickformat: ",.0f",
+    showspikes: false,
+  },
+  shapes: [
+    // 0: window-open reference line (y rewritten when openPx known)
+    { type: "line", xref: "x", yref: "y", x0: 0, x1: 900, y0: 0, y1: 0,
+      line: { color: "#ffcc00", width: 1.4, dash: "dash" } },
+  ],
+};
+const CONFIG = { responsive: true, displayModeBar: false, scrollZoom: false, staticPlot: true };
+
+function ensureChartInit() {
+  if (chartInited || !window.Plotly) return;
+  Plotly.newPlot(CHART_ID, [
+    // 0: BTC price line
+    { x: [], y: [], type: "scatter", mode: "lines",
+      line: { color: "#00d4ff", width: 2.5, shape: "spline", smoothing: 0.6 } },
+    // 1: BUY UP triangles
+    { x: [], y: [], type: "scatter", mode: "markers",
+      marker: { symbol: "triangle-up", size: [], color: "#00ff9f",
+                line: { color: "#003a25", width: 1.5 } } },
+    // 2: BUY DOWN triangles
+    { x: [], y: [], type: "scatter", mode: "markers",
+      marker: { symbol: "triangle-down", size: [], color: "#ff3b6b",
+                line: { color: "#3a000f", width: 1.5 } } },
+  ], LAYOUT, CONFIG);
+  chartInited = true;
+}
+
+function computeYRange() {
+  const op = series.openPx;
+  if (op == null || !Number.isFinite(op) || op <= 0) return null;
+  if (!series.data.length) return null;
+  let maxDev = 0;
+  for (const p of series.data) {
+    const d = Math.abs(p.px - op);
+    if (d > maxDev) maxDev = d;
+  }
+  const floor = op * 0.0015;     // 15 bps floor
+  const buf   = op * 0.0010;     // 10 bps for triangles
+  const half  = Math.max(maxDev + buf, floor);
+  const pad   = half * 0.25;
+  return [op - half - pad, op + half + pad];
+}
+
+function priceAtSec(sec) {
+  const d = series.data;
+  if (!d.length) return null;
+  let best = d[0], bestGap = Math.abs(d[0].sec - sec);
+  for (const p of d) {
+    const g = Math.abs(p.sec - sec);
+    if (g < bestGap) { best = p; bestGap = g; }
+    if (p.sec >= sec) break;
+  }
+  return best.px;
+}
+
+function btcChartPush(p) {
+  const wTs    = Number(p.window_open_ts);
+  const openPx = p.window_open_px != null ? Number(p.window_open_px) : null;
+  const sec    = Number(p.sample_sec);
+  const px     = p.current_price != null ? Number(p.current_price) : null;
+  if (!Number.isFinite(sec) || px == null || !Number.isFinite(px)) return;
+
+  const changed = series.wTs !== wTs;
+  if (changed) {
+    series.wTs = wTs;
+    series.openPx = openPx;
+    series.data = [];
+    _clusterKey = "";
+    ensureChartInit();
+    if (chartInited && window.Plotly) {
+      Plotly.restyle(CHART_ID, { x: [[],[],[]], y: [[],[],[]] });
+      const lay = { "xaxis.range": [0, 900] };
+      if (openPx != null) { lay["shapes[0].y0"] = openPx; lay["shapes[0].y1"] = openPx; }
+      Plotly.relayout(CHART_ID, lay);
+    }
+  } else if (openPx != null && series.openPx == null) {
+    series.openPx = openPx;
+    if (chartInited && window.Plotly) {
+      Plotly.relayout(CHART_ID, { "shapes[0].y0": openPx, "shapes[0].y1": openPx });
+    }
+  }
+
+  ensureChartInit();
+  if (!chartInited || !window.Plotly) return;
+
+  const last = series.data[series.data.length - 1];
+  if (!last || sec !== last.sec) {
+    series.data.push({ sec, px });
+    Plotly.extendTraces(CHART_ID, { x: [[sec]], y: [[px]] }, [0]);
+    const r = computeYRange();
+    if (r) Plotly.relayout(CHART_ID, { "yaxis.range": r });
+  } else {
+    last.px = px;
+  }
+
+  // Header price + delta
+  $("btc-price").textContent = fmtPrice(px);
+  const dEl = $("btc-delta");
+  const op = series.openPx;
+  if (op != null && Number.isFinite(op) && op > 0) {
+    const d   = px - op;
+    const bps = (px / op - 1) * 10000;
+    const sign = d >= 0 ? "▲" : "▼";
+    dEl.className = "chart-delta " + (d >= 0 ? "profit" : "loss");
+    dEl.innerHTML = `${sign} ${Math.abs(bps).toFixed(1)} bps`;
+  } else {
+    dEl.textContent = "—";
+    dEl.className = "chart-delta";
+  }
+}
+
+// ─── Clustering for the chart triangles ──────────────────────────────────
+const CLUSTER_GAP_SEC = 8;
+function clusterTrades(trades) {
+  const clusters = [];
+  for (const t of trades || []) {
+    const last = clusters[clusters.length - 1];
+    if (last && last.direction === t.direction
+        && t.sample_sec - last.last_sec <= CLUSTER_GAP_SEC) {
+      last.trades.push(t);
+      last.last_sec = t.sample_sec;
+    } else {
+      clusters.push({ direction: t.direction, trades: [t],
+                      first_sec: t.sample_sec, last_sec: t.sample_sec });
+    }
+  }
+  return clusters;
+}
+function clusterMarkerSize(n) {
+  return Math.round(Math.max(14, Math.min(40, 12 + Math.log2(n + 1) * 6)));
+}
+
+let _clusterKey = "";
+function refreshChartClusters(arbWindow) {
+  if (!chartInited || !window.Plotly) return;
+  const trades = (arbWindow && arbWindow.trades) || [];
+  const key = `${arbWindow ? arbWindow.window_open_ts : ""}-${trades.length}`;
+  if (key === _clusterKey) return;
+  _clusterKey = key;
+  if (!trades.length) {
+    Plotly.restyle(CHART_ID, { x: [[],[]], y: [[],[]], "marker.size": [[],[]] }, [1, 2]);
+    return;
+  }
+  const clusters = clusterTrades(trades);
+  const upX = [], upY = [], upSize = [];
+  const dnX = [], dnY = [], dnSize = [];
+  const BUF = 0.0010;   // 10 bps
+  for (const c of clusters) {
+    const xMid = (c.first_sec + c.last_sec) / 2;
+    const px = priceAtSec(xMid);
+    if (px == null) continue;
+    const isUp = c.direction === "BUY YES";
+    const y = isUp ? px * (1 + BUF) : px * (1 - BUF);
+    const sz = clusterMarkerSize(c.trades.length);
+    if (isUp) { upX.push(xMid); upY.push(y); upSize.push(sz); }
+    else      { dnX.push(xMid); dnY.push(y); dnSize.push(sz); }
+  }
+  Plotly.restyle(CHART_ID, {
+    x: [upX, dnX], y: [upY, dnY], "marker.size": [upSize, dnSize]
+  }, [1, 2]);
+}
+
+// ─── Signal feed (right ticker) ──────────────────────────────────────────
+//
+// We render the most-recent N trades from arb_window.trades. Each trade
+// has direction, sample_sec, window_open_ts, status (live|won|lost),
+// pnl, entry_ask. We hide model_p / market_mid / delta_pp on purpose.
+const MAX_TICKER_ROWS = 9;
+let _lastTickerTradeIds = new Set();
+function renderTicker(arbWindow, sessionPnL) {
+  const list = $("ticker-list");
+  const trades = (arbWindow && arbWindow.trades) || [];
+  if (!trades.length) {
+    list.innerHTML = `<div style="color:var(--muted);font-size:11px;padding-top:30px;text-align:center;">
+      no signals yet this window…
+    </div>`;
+    _lastTickerTradeIds = new Set();
+    return;
+  }
+  // Newest first (per trade_id added order — server appends, so reverse).
+  const recent = trades.slice().reverse().slice(0, MAX_TICKER_ROWS);
+  const now = Date.now() / 1000;
+  const wts = Number(arbWindow.window_open_ts);
+  const newIds = new Set();
+  let html = "";
+  for (const t of recent) {
+    const tid = String(t.trade_id);
+    newIds.add(tid);
+    const fireWall = wts + Number(t.sample_sec);
+    const ago = Math.max(0, now - fireWall);
+    const isUp  = t.direction === "BUY YES";
+    const dirCls = isUp ? "up" : "down";
+    const dirTxt = isUp ? "BUY UP" : "BUY DOWN";
+    const statusCls = t.status === "won" ? "won"
+                    : t.status === "lost" ? "lost"
+                    : "live";
+    const statusTxt = t.status === "won"  ? "WON"
+                    : t.status === "lost" ? "LOST"
+                    : "LIVE";
+    const pnl = Number(t.pnl);
+    const pnlCls = !Number.isFinite(pnl)         ? "pending"
+                 : t.status === "live"            ? "pending"
+                 : pnl >= 0                       ? "profit" : "loss";
+    const pnlTxt = !Number.isFinite(pnl) || t.status === "live"
+                 ? "pending"
+                 : fmtMoney(pnl);
+    const newCls = _lastTickerTradeIds.has(tid) ? "" : " new";
+    html += `<div class="sig-row ${statusCls}${newCls}" data-tid="${tid}">
+      <div class="when">${relTime(ago)} · T+${t.sample_sec}s · entry $${Number(t.entry_ask).toFixed(3)}</div>
+      <div class="pnl-line">
+        <span class="dir ${dirCls}">${dirTxt}</span>
+        <span class="status">${statusTxt} <span class="pnl ${pnlCls}">${pnlTxt}</span></span>
+      </div>
+    </div>`;
+  }
+  list.innerHTML = html;
+  _lastTickerTradeIds = newIds;
+}
+
+// ─── Signal flash overlay ────────────────────────────────────────────────
+let _knownTradeIds = new Set();
+function maybeFlashNewSignals(arbWindow) {
+  const trades = (arbWindow && arbWindow.trades) || [];
+  // On first load, seed without flashing.
+  if (_knownTradeIds.size === 0 && trades.length) {
+    for (const t of trades) _knownTradeIds.add(String(t.trade_id));
+    return;
+  }
+  for (const t of trades) {
+    const tid = String(t.trade_id);
+    if (_knownTradeIds.has(tid)) continue;
+    _knownTradeIds.add(tid);
+    flashSignal(t);
+  }
+}
+
+let _flashTimer = null;
+function flashSignal(trade) {
+  const el = $("signal-flash");
+  const isUp = trade.direction === "BUY YES";
+  el.className = isUp ? "show up" : "show down";
+  el.innerHTML = (isUp ? "BUY UP" : "BUY DOWN")
+               + `<div class="sub">entry $${Number(trade.entry_ask).toFixed(3)} · T+${trade.sample_sec}s</div>`;
+  clearTimeout(_flashTimer);
+  _flashTimer = setTimeout(() => { el.className = ""; }, 1400);
+}
+
+// ─── Header session stats (refreshed from arb_window per tick + window log periodic) ──
+let _sessionWindowsCache = [];
+
+function updateHeaderStats(arbWindow) {
+  // From current arb_window: trade count + W/L + current-window pnl.
+  const trades = (arbWindow && arbWindow.trades) || [];
+  let wins = 0, losses = 0, live = 0;
+  let windowPnl = 0;
+  for (const t of trades) {
+    const pnl = Number(t.pnl);
+    if (t.status === "won")  wins++;
+    else if (t.status === "lost") losses++;
+    else live++;
+    if (Number.isFinite(pnl) && t.status !== "live") windowPnl += pnl;
+  }
+
+  // Add session totals from settled windows (cached from /window_pnl_log).
+  let sessionPnl = windowPnl;
+  let sessionWins = wins, sessionLosses = losses;
+  let bestWin = 0, worstWin = 0;
+  for (const w of _sessionWindowsCache) {
+    sessionPnl    += Number(w.pnl)    || 0;
+    sessionWins   += Number(w.wins)   || 0;
+    sessionLosses += Number(w.losses) || 0;
+    const wp = Number(w.pnl) || 0;
+    if (wp > bestWin)  bestWin  = wp;
+    if (wp < worstWin) worstWin = wp;
+  }
+
+  const totalTrades = sessionWins + sessionLosses;
+  const wr = totalTrades > 0 ? (sessionWins / totalTrades * 100) : null;
+
+  // Session P&L hero
+  const pnlEl = $("pnl-session");
+  pnlEl.textContent = fmtMoney(sessionPnl);
+  pnlEl.className = "pnl-hero " + (sessionPnl >= 0 ? "profit" : "loss");
+
+  // Window P&L
+  const wpEl = $("window-pnl");
+  wpEl.textContent = fmtMoney(windowPnl);
+  wpEl.style.color = windowPnl >= 0 ? "var(--profit)" : "var(--loss)";
+
+  // Win rate
+  const wrEl = $("wr-pct");
+  if (wr == null) {
+    wrEl.textContent = "—"; wrEl.className = "stat-v";
+  } else {
+    wrEl.textContent = wr.toFixed(0) + "%";
+    wrEl.className = "stat-v " + (wr >= 65 ? "wr-good" : wr >= 50 ? "wr-mid" : "wr-bad");
+  }
+
+  // Trade count
+  $("trades-count").textContent = totalTrades + (live > 0 ? ` + ${live}🔥` : "");
+
+  // Footer
+  $("f-wins").textContent   = sessionWins;
+  $("f-losses").textContent = sessionLosses;
+  $("f-best").textContent   = fmtMoney(bestWin);
+  $("f-worst").textContent  = fmtMoney(worstWin);
+  // Streak: walk settled windows back from latest, count consecutive UP/DOWN PnL direction.
+  let streakSign = null, streakN = 0;
+  for (let i = _sessionWindowsCache.length - 1; i >= 0; i--) {
+    const v = Number(_sessionWindowsCache[i].pnl) || 0;
+    const s = v >= 0 ? 1 : -1;
+    if (streakSign === null) streakSign = s;
+    if (s === streakSign) streakN++; else break;
+  }
+  const sEl = $("f-streak");
+  if (streakSign === null) { sEl.textContent = "—"; sEl.style.color = ""; }
+  else {
+    sEl.textContent = `${streakN}W ${streakSign > 0 ? "🔥" : "❄️"}`;
+    sEl.style.color = streakSign > 0 ? "var(--profit)" : "var(--loss)";
+  }
+}
+
+// ─── Countdown to next window roll ───────────────────────────────────────
+function updateCountdown() {
+  if (!series.wTs) return;
+  const elapsed = Date.now()/1000 - series.wTs;
+  const remaining = Math.max(0, 900 - elapsed);
+  const mm = Math.floor(remaining / 60);
+  const ss = Math.floor(remaining % 60);
+  $("cd-val").textContent = `${mm}:${ss.toString().padStart(2, "0")}`;
+}
+setInterval(updateCountdown, 1000);
+
+// ─── WS handler ──────────────────────────────────────────────────────────
+const predUrl = (() => {
+  if (location.protocol === "file:") return "ws://localhost:8000/ws/predictions";
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}/ws/predictions`;
+})();
+let predWs = null, predDelay = 1000;
+function connectPred() {
+  setConn("connecting…", "warn");
+  try { predWs = new WebSocket(predUrl); }
+  catch (e) { setConn("server down", "dead"); setTimeout(connectPred, predDelay); predDelay = Math.min(predDelay * 2, 15000); return; }
+
+  predWs.onopen = () => { predDelay = 1000; setConn("● LIVE", "live"); };
+  predWs.onerror = () => {};
+  predWs.onclose = () => { setConn("disconnected", "dead"); setTimeout(connectPred, predDelay); predDelay = Math.min(predDelay * 2, 15000); };
+  predWs.onmessage = (e) => {
+    let msg; try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg && msg.type === "history" && Array.isArray(msg.points)) {
+      for (const p of msg.points) btcChartPush(p);
+      return;
+    }
+    onPrediction(msg);
+  };
+}
+
+function onPrediction(p) {
+  btcChartPush(p);
+  refreshChartClusters(p.arb_window);
+  maybeFlashNewSignals(p.arb_window);
+  renderTicker(p.arb_window);
+  updateHeaderStats(p.arb_window);
+}
+
+// ─── Periodic window-log poll for session totals ─────────────────────────
+async function refreshWindowLog() {
+  const base = location.protocol === "file:" ? "http://localhost:8000" : "";
+  try {
+    const r = await fetch(`${base}/window_pnl_log?limit=200`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const rows = d.entries || [];
+    // Session = today (rolling 24h from now to keep YouTube viewers anchored).
+    const cutoff = Date.now()/1000 - 24*3600;
+    _sessionWindowsCache = rows.filter(w => Number(w.window_open_ts) >= cutoff);
+  } catch (e) { /* keep last good cache */ }
+}
+refreshWindowLog();
+setInterval(refreshWindowLog, 30_000);
+
+// Boot
+connectPred();
+</script>
+</body>
+</html>
