@@ -1543,6 +1543,33 @@ function ensureBtcWinInit() {
   btcWinInited = true;
 }
 
+// Smart y-range — keep the chart centered on the window-open price and
+// scale to fit actual movement plus a small pad. Without this Plotly's
+// auto-range adds ~$1-2k of whitespace for a $50 real move because the
+// numeric scale is dominated by the $76k absolute price.
+//
+//   half_range = max( max(|px - open|) + triangle_buffer,  min_floor )
+//   y_range    = [open - half_range*(1+pad),  open + half_range*(1+pad)]
+//
+// min_floor = 15 bps so the axis doesn't whip around in a flat tape.
+// triangle_buffer = 8 bps to keep the BUY YES / BUY NO markers in frame.
+function btcWinComputeYRange() {
+  const op = btcWinSeries.openPx;
+  if (op == null || !Number.isFinite(op) || op <= 0) return null;
+  const d = btcWinSeries.data;
+  if (!d.length) return null;
+  let maxDev = 0;
+  for (const p of d) {
+    const dev = Math.abs(p.px - op);
+    if (dev > maxDev) maxDev = dev;
+  }
+  const minFloor       = op * 0.0015;   // 15 bps floor
+  const triangleBuffer = op * 0.0008;   // 8 bps for markers
+  const halfRange = Math.max(maxDev + triangleBuffer, minFloor);
+  const pad = halfRange * 0.20;
+  return [op - halfRange - pad, op + halfRange + pad];
+}
+
 // Match a sample_sec to its BTC price from the in-memory series. Falls back
 // to the nearest neighbour so a cluster's midpoint (often non-integer)
 // resolves cleanly. Returns null if the series is empty.
@@ -1647,6 +1674,12 @@ function btcWinAppend(p) {
   if (!last || sec !== last.sec) {
     btcWinSeries.data.push({ sec, px });
     Plotly.extendTraces(BTC_WIN_CHART_ID, { x: [[sec]], y: [[px]] }, [0]);
+    // Recompute y-range once per second (cheap; one relayout per tick).
+    // Plotly's auto-range pads with way too much whitespace when the actual
+    // movement is small relative to $76k — without this you see ~$2k of empty
+    // chart for every $50 of real price action.
+    const r = btcWinComputeYRange();
+    if (r) Plotly.relayout(BTC_WIN_CHART_ID, { "yaxis.range": r });
   } else {
     last.px = px;
   }
