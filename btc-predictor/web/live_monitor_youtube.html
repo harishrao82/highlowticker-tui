@@ -175,6 +175,99 @@
   .countdown .c-val { color: var(--text); }
   .countdown .c-lab { font-size: 11px; letter-spacing: 3px; }
 
+  /* YES/NO TUG-OF-WAR PRICE BAR */
+  .ynbar {
+    margin: 6px 0 18px;
+    padding: 4px 2px 0;
+    position: relative;
+  }
+  .ynbar-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    align-items: baseline;
+  }
+  .ynbar-side {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .ynbar-side .lbl {
+    font-family: "Bebas Neue";
+    font-size: 18px;
+    letter-spacing: 5px;
+  }
+  .ynbar-side.yes .lbl { color: var(--profit); }
+  .ynbar-side.no  .lbl { color: var(--loss); }
+  .ynbar-side .price {
+    font-family: "JetBrains Mono";
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text);
+    transition: color .25s ease;
+  }
+  .ynbar-side .pct {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    margin-left: 4px;
+  }
+  .ynbar-track {
+    position: relative;
+    height: 22px;
+    background: var(--bg-glow);
+    border: 1px solid #1a2440;
+    border-radius: 11px;
+    overflow: hidden;
+    box-shadow: 0 0 30px rgba(0,212,255,0.05) inset;
+  }
+  .ynbar-fill-yes {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, rgba(0,255,159,0.7) 0%, rgba(0,255,159,0.35) 100%);
+    transition: width .35s cubic-bezier(.2,.7,.3,1);
+    box-shadow: 0 0 18px rgba(0,255,159,0.45) inset;
+  }
+  .ynbar-fill-no {
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    background: linear-gradient(270deg, rgba(255,59,107,0.7) 0%, rgba(255,59,107,0.35) 100%);
+    transition: width .35s cubic-bezier(.2,.7,.3,1);
+    box-shadow: 0 0 18px rgba(255,59,107,0.45) inset;
+  }
+  .ynbar-edge {
+    position: absolute;
+    top: -2px; bottom: -2px;
+    width: 3px;
+    background: var(--text);
+    border-radius: 2px;
+    transition: left .35s cubic-bezier(.2,.7,.3,1);
+    box-shadow: 0 0 10px rgba(255,255,255,0.6);
+    transform: translateX(-50%);
+  }
+  .ynbar-ai-marker {
+    position: absolute;
+    top: 22px;
+    transform: translateX(-50%);
+    transition: left .35s cubic-bezier(.2,.7,.3,1);
+    text-align: center;
+    pointer-events: none;
+  }
+  .ynbar-ai-marker .tri {
+    color: var(--gold);
+    font-size: 16px;
+    line-height: 1;
+    filter: drop-shadow(0 0 6px rgba(255,204,0,0.8));
+  }
+  .ynbar-ai-marker .ai-lbl {
+    font-family: "Bebas Neue";
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--gold);
+    margin-top: 2px;
+    text-shadow: 0 0 8px rgba(255,204,0,0.5);
+  }
+
   /* SIGNAL TICKER */
   #ticker {
     background: var(--bg-panel);
@@ -332,10 +425,29 @@
 
 <div id="chart-panel">
   <div class="chart-head">
-    <div class="chart-title">P(UP) · CURRENT WINDOW</div>
-    <div>
-      <span class="chart-price"><span id="kal-pct" style="color:#00d4ff">—</span> <span style="font-size:14px;color:var(--muted);letter-spacing:2px;">MARKET</span></span>
-      <span class="chart-price" style="margin-left:18px;"><span id="mod-pct" style="color:#00ff9f">—</span> <span style="font-size:14px;color:var(--muted);letter-spacing:2px;">A.I.</span></span>
+    <div class="chart-title">KALSHI MARKET · 15-MIN UP/DOWN</div>
+  </div>
+  <div class="ynbar">
+    <div class="ynbar-labels">
+      <div class="ynbar-side yes">
+        <span class="lbl">YES</span>
+        <span class="price" id="yes-price">$—</span>
+        <span class="pct" id="yes-pct">—</span>
+      </div>
+      <div class="ynbar-side no">
+        <span class="pct" id="no-pct">—</span>
+        <span class="price" id="no-price">$—</span>
+        <span class="lbl">NO</span>
+      </div>
+    </div>
+    <div class="ynbar-track">
+      <div class="ynbar-fill-yes" id="ynbar-fill-yes" style="width:50%;"></div>
+      <div class="ynbar-fill-no"  id="ynbar-fill-no"  style="width:50%;"></div>
+      <div class="ynbar-edge"     id="ynbar-edge"     style="left:50%;"></div>
+    </div>
+    <div class="ynbar-ai-marker" id="ynbar-ai" style="left:50%;display:none;">
+      <div class="tri">▲</div>
+      <div class="ai-lbl">A.I. · <span id="ai-pct">—</span></div>
     </div>
   </div>
   <div id="btc-chart"></div>
@@ -494,9 +606,38 @@ function probChartPush(p) {
     last.model_p  = mPy;
   }
 
-  // Header percent badges
-  $("mod-pct").textContent = (mPy * 100).toFixed(0) + "%";
-  $("kal-pct").textContent = kPy != null ? (kPy * 100).toFixed(0) + "%" : "—";
+  // ── Tug-of-war YES/NO price bar ──
+  // Kalshi YES mid + bid/ask come straight off the WS; NO is the
+  // complement. Bar fill = current YES share of the market. A.I.
+  // marker sits on the same horizontal scale at model_p, so when it
+  // drifts away from the edge the audience can see the algorithm
+  // disagreeing with the market in real time.
+  const k = p.kalshi || {};
+  const yMid = (k.yes_mid != null) ? Number(k.yes_mid) : (kPy != null ? kPy : null);
+  const yAsk = (k.yes_ask != null) ? Number(k.yes_ask) : null;
+  if (yMid != null && Number.isFinite(yMid)) {
+    const nMid = 1 - yMid;
+    const yPct = Math.max(0, Math.min(100, yMid * 100));
+    $("ynbar-fill-yes").style.width = yPct + "%";
+    $("ynbar-fill-no").style.width  = (100 - yPct) + "%";
+    $("ynbar-edge").style.left      = yPct + "%";
+    // Price label is the ASK if we have it (what you'd actually pay), mid otherwise.
+    const yPrice = yAsk != null && Number.isFinite(yAsk) ? yAsk : yMid;
+    const nPrice = 1 - yPrice;
+    $("yes-price").textContent = "$" + yPrice.toFixed(3);
+    $("no-price").textContent  = "$" + nPrice.toFixed(3);
+    $("yes-pct").textContent = (yMid * 100).toFixed(0) + "%";
+    $("no-pct").textContent  = (nMid * 100).toFixed(0) + "%";
+  }
+  // A.I. marker — position at model_p on the same 0-100% scale
+  const aiEl = $("ynbar-ai");
+  if (Number.isFinite(mPy)) {
+    aiEl.style.display = "";
+    aiEl.style.left = (Math.max(0, Math.min(100, mPy * 100))) + "%";
+    $("ai-pct").textContent = (mPy * 100).toFixed(0) + "%";
+  } else {
+    aiEl.style.display = "none";
+  }
 }
 
 // ─── Clustering for the chart triangles ──────────────────────────────────
