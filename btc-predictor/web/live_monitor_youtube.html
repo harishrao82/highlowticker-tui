@@ -39,7 +39,7 @@
   /* Page grid: top hero band, big chart, signal ticker on right */
   body {
     display: grid;
-    grid-template-rows: 130px 1fr 90px;
+    grid-template-rows: 130px 1fr 110px;
     grid-template-columns: 1fr 230px;
     gap: 14px;
     padding: 14px;
@@ -963,13 +963,12 @@ function updateHeaderStats(arbWindow) {
 // ── PAST WINDOWS strip — Kalshi-style cards ──────────────────────────────
 //
 // Each card mirrors Kalshi's "positions" card layout:
-//   [ ↑ Yes / ↓ No ]   Cost ⓢ          May 27 · Paid out
-//                      $X.XX           $Y.YY
+//   [ Yes / No ]   Cost ⓢ   Paid out
+//   time          $X.XX    $Y.YY
 //
 // Cost = winner_avg_entry × wins + loser_avg_entry × losses
 //        (size=1 paper mode → real dollars spent on the window)
 // Paid out = wins  (each winning contract pays $1, size=1)
-const MONTH = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function refreshPastWindows() {
   const strip = $("past-strip");
   const rows  = _sessionWindowsCache.slice();
@@ -979,14 +978,12 @@ function refreshPastWindows() {
   }
   rows.reverse();   // newest first
   let html = "";
-  for (const w of rows.slice(0, 24)) {
+  for (const w of rows.slice(0, 6)) {
     const wts     = Number(w.window_open_ts) * 1000;
     const dt      = new Date(wts);
     const time    = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-    const dateLbl = `${MONTH[dt.getMonth()]} ${dt.getDate()}`;
     const outcome = (w.outcome || "").toUpperCase();
     const isUp    = outcome === "UP";
-    const pnl     = Number(w.pnl) || 0;
     const wins    = Number(w.wins)   || 0;
     const losses  = Number(w.losses) || 0;
     const wAvg    = Number(w.winner_avg_entry);
@@ -996,7 +993,6 @@ function refreshPastWindows() {
     const paidOut = wins * 1.0;   // each winning contract pays $1 (size=1)
     const profit  = paidOut - cost;
     const paidCls = profit > 0 ? "profit" : profit < 0 ? "loss" : "";
-    const paidLbl = profit > 0 ? "paid" : "unpaid";
     html += `<div class="past-card">
       <div class="pc-side ${isUp ? "up" : "down"}">
         ${isUp ? "Yes" : "No"}
@@ -1007,7 +1003,7 @@ function refreshPastWindows() {
         <div class="pc-v">$${cost.toFixed(2)}</div>
       </div>
       <div class="pc-col">
-        <div class="pc-l ${paidLbl}">${dateLbl} · Paid out</div>
+        <div class="pc-l">Paid out</div>
         <div class="pc-v ${paidCls}">$${paidOut.toFixed(2)}</div>
       </div>
     </div>`;
