@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-IP="${IP:-18.234.83.119}"
+IP="${IP:-23.20.34.12}"
 KEY="${KEY:-$HOME/.ssh/id_ed25519}"
 USER="${EC2_USER:-ec2-user}"
 
@@ -41,7 +41,7 @@ echo
 echo "→ thresholds BEFORE restart:"
 echo "  Mac:  $(curl -s http://localhost:8000/window_pnl_log?limit=1 2>/dev/null \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("active_thresholds"))' 2>/dev/null || echo '(unreachable)')"
-echo "  AWS:  $(curl -s https://precision-diabetes-warned-linda.trycloudflare.com/window_pnl_log?limit=1 \
+echo "  AWS:  $(curl -s https://described-bras-memories-narrative.trycloudflare.com/window_pnl_log?limit=1 \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("active_thresholds"))')"
 
 # Restart AWS service so rehydrate runs against the freshly-synced data
@@ -53,7 +53,7 @@ echo
 echo "→ waiting for AWS startup…"
 for i in $(seq 1 90); do
     if curl -s -m 2 -o /dev/null -w "%{http_code}" \
-         https://precision-diabetes-warned-linda.trycloudflare.com/window_pnl_log?limit=1 \
+         https://described-bras-memories-narrative.trycloudflare.com/window_pnl_log?limit=1 \
          2>/dev/null | grep -q 200; then
         echo "  ready in ${i}s"
         break
@@ -66,5 +66,5 @@ echo
 echo "→ thresholds AFTER restart:"
 echo "  Mac:  $(curl -s http://localhost:8000/window_pnl_log?limit=1 2>/dev/null \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("active_thresholds"))' 2>/dev/null || echo '(unreachable)')"
-echo "  AWS:  $(curl -s https://precision-diabetes-warned-linda.trycloudflare.com/window_pnl_log?limit=1 \
+echo "  AWS:  $(curl -s https://described-bras-memories-narrative.trycloudflare.com/window_pnl_log?limit=1 \
             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("active_thresholds"))')"
